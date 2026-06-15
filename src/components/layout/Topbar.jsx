@@ -1,16 +1,17 @@
 import { useAuth } from '../../context/AuthContext';
 import './Topbar.css';
 
-export default function Topbar({ building, title }) {
+export default function Topbar({ title, selectedDevice }) {
   const { user, logout } = useAuth();
 
   return (
     <header className="topbar">
       <div className="topbar-title">
         <h2>{title}</h2>
-        {building && (
+        {selectedDevice && (
           <p>
-            {building.building_name} &middot; {building.address}
+            {(selectedDevice.device_remarks || selectedDevice.device_uuid)}
+            {selectedDevice.group_name ? ` · ${selectedDevice.group_name}` : ''}
           </p>
         )}
       </div>

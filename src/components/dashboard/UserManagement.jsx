@@ -1,5 +1,12 @@
-import { useEffect, useState } from 'react';
-import { fetchUsers, createUser, toggleUserActive } from '../../services/api';
+import { useEffect, useMemo, useState } from 'react';
+import {
+  fetchUsers,
+  createUser,
+  toggleUserActive,
+  fetchGroups,
+  fetchDevices,
+} from '../../services/api';
+import { useAuth } from '../../context/AuthContext';
 import './UserManagement.css';
 
 const ROLES = ['ADMIN', 'FIRE_OFFICER', 'BUILDING_MANAGER', 'VIEWER'];
@@ -11,8 +18,24 @@ const ROLE_BADGE = {
   VIEWER: 'role-viewer',
 };
 
+const EMPTY_FORM = {
+  username: '',
+  email: '',
+  password: '',
+  confirmPassword: '',
+  first_name: '',
+  last_name: '',
+  mobile_no: '',
+  role: 'VIEWER',
+  group_id: '',
+  device_id: '',
+};
+
 export default function UserManagement() {
+  const { user: currentUser } = useAuth();
   const [users, setUsers] = useState([]);
+  const [groups, setGroups] = useState([]);
+  const [devices, setDevices] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
   const [showForm, setShowForm] = useState(false);
@@ -20,23 +43,24 @@ export default function UserManagement() {
   const [successMsg, setSuccessMsg] = useState('');
   const [formError, setFormError] = useState('');
 
-  const [form, setForm] = useState({
-    username: '',
-    email: '',
-    password: '',
-    confirmPassword: '',
-    role: 'operator',
-  });
+  const [form, setForm] = useState(EMPTY_FORM);
 
   useEffect(() => {
-    loadUsers();
+    loadAll();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function loadUsers() {
+  async function loadAll() {
     try {
       setIsLoading(true);
-      const data = await fetchUsers();
-      setUsers(data);
+      const [usersData, groupsData, devicesData] = await Promise.all([
+        fetchUsers(),
+        fetchGroups(),
+        fetchDevices(currentUser),
+      ]);
+      setUsers(usersData);
+      setGroups(groupsData);
+      setDevices(devicesData);
     } catch (err) {
       setError(err.message || 'Failed to load users');
     } finally {
@@ -44,9 +68,31 @@ export default function UserManagement() {
     }
   }
 
+  // Devices selectable for the chosen group (the DB trigger requires the
+  // assigned device to belong to the same group as the user).
+  const devicesForGroup = useMemo(() => {
+    if (!form.group_id) return devices;
+    return devices.filter((d) => String(d.group_id) === String(form.group_id));
+  }, [devices, form.group_id]);
+
   function handleFormChange(e) {
-    setForm((prev) => ({ ...prev, [e.target.name]: e.target.value }));
+    const { name, value } = e.target;
+    setForm((prev) => {
+      const next = { ...prev, [name]: value };
+      // Changing the group invalidates a device from a different group.
+      if (name === 'group_id') next.device_id = '';
+      // Selecting a device auto-aligns the group to that device's group.
+      if (name === 'device_id' && value) {
+        const dev = devices.find((d) => String(d.id) === String(value));
+        if (dev && dev.group_id) next.group_id = String(dev.group_id);
+      }
+      return next;
+    });
     setFormError('');
+  }
+
+  function resetForm() {
+    setForm(EMPTY_FORM);
   }
 
   async function handleSubmit(e) {
@@ -67,11 +113,16 @@ export default function UserManagement() {
         email: form.email.trim(),
         password: form.password,
         role: form.role,
+        first_name: form.first_name.trim(),
+        last_name: form.last_name.trim(),
+        mobile_no: form.mobile_no.trim(),
+        group_id: form.group_id ? Number(form.group_id) : null,
+        device_id: form.device_id ? Number(form.device_id) : null,
       });
       setSuccessMsg(`User "${form.username}" created successfully.`);
-      setForm({ username: '', email: '', password: '', confirmPassword: '', role: 'operator' });
+      resetForm();
       setShowForm(false);
-      await loadUsers();
+      await loadAll();
     } catch (err) {
       setFormError(err.message || 'Failed to create user.');
     } finally {
@@ -79,12 +130,10 @@ export default function UserManagement() {
     }
   }
 
-  async function handleToggleActive(user) {
+  async function handleToggleActive(u) {
     try {
-      await toggleUserActive(user.id, !user.is_active);
-      setUsers((prev) =>
-        prev.map((u) => (u.id === user.id ? { ...u, is_active: !u.is_active } : u))
-      );
+      await toggleUserActive(u.id, !u.is_active);
+      setUsers((prev) => prev.map((x) => (x.id === u.id ? { ...x, is_active: !x.is_active } : x)));
     } catch (err) {
       setError(err.message || 'Failed to update user.');
     }
@@ -95,7 +144,7 @@ export default function UserManagement() {
       <div className="um-header">
         <div>
           <h3 className="um-title">User Management</h3>
-          <p className="um-subtitle">Manage system access and roles</p>
+          <p className="um-subtitle">Manage system access, roles and device assignments</p>
         </div>
         <button
           className="um-add-btn"
@@ -105,15 +154,7 @@ export default function UserManagement() {
             setSuccessMsg('');
           }}
         >
-          {showForm ? (
-            <>
-              <span>✕</span> Cancel
-            </>
-          ) : (
-            <>
-              <span>+</span> Add User
-            </>
-          )}
+          {showForm ? <><span>✕</span> Cancel</> : <><span>+</span> Add User</>}
         </button>
       </div>
 
@@ -127,78 +168,79 @@ export default function UserManagement() {
             <div className="um-form-row">
               <div className="um-field">
                 <label className="um-label">Username</label>
-                <input
-                  className="um-input"
-                  name="username"
-                  value={form.username}
-                  onChange={handleFormChange}
-                  placeholder="e.g. john_doe"
-                  autoComplete="off"
-                />
+                <input className="um-input" name="username" value={form.username} onChange={handleFormChange} placeholder="e.g. rajesh.sharma" autoComplete="off" />
               </div>
               <div className="um-field">
                 <label className="um-label">Email</label>
-                <input
-                  className="um-input"
-                  name="email"
-                  type="email"
-                  value={form.email}
-                  onChange={handleFormChange}
-                  placeholder="e.g. john@company.com"
-                  autoComplete="off"
-                />
+                <input className="um-input" name="email" type="email" value={form.email} onChange={handleFormChange} placeholder="e.g. user@company.com" autoComplete="off" />
+              </div>
+            </div>
+
+            <div className="um-form-row">
+              <div className="um-field">
+                <label className="um-label">First Name</label>
+                <input className="um-input" name="first_name" value={form.first_name} onChange={handleFormChange} placeholder="First name" autoComplete="off" />
+              </div>
+              <div className="um-field">
+                <label className="um-label">Last Name</label>
+                <input className="um-input" name="last_name" value={form.last_name} onChange={handleFormChange} placeholder="Last name" autoComplete="off" />
+              </div>
+            </div>
+
+            <div className="um-form-row">
+              <div className="um-field">
+                <label className="um-label">Mobile No.</label>
+                <input className="um-input" name="mobile_no" value={form.mobile_no} onChange={handleFormChange} placeholder="e.g. 9876543210" autoComplete="off" />
+              </div>
+              <div className="um-field">
+                <label className="um-label">Role</label>
+                <select className="um-select" name="role" value={form.role} onChange={handleFormChange}>
+                  {ROLES.map((r) => (
+                    <option key={r} value={r}>{r.replace(/_/g, ' ')}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="um-form-row">
+              <div className="um-field">
+                <label className="um-label">Group</label>
+                <select className="um-select" name="group_id" value={form.group_id} onChange={handleFormChange}>
+                  <option value="">— No group —</option>
+                  {groups.map((g) => (
+                    <option key={g.id} value={g.id}>{g.group_name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="um-field">
+                <label className="um-label">Assigned Device</label>
+                <select className="um-select" name="device_id" value={form.device_id} onChange={handleFormChange}>
+                  <option value="">— No device —</option>
+                  {devicesForGroup.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {(d.device_remarks || d.device_uuid)} ({d.device_uuid})
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
 
             <div className="um-form-row">
               <div className="um-field">
                 <label className="um-label">Password</label>
-                <input
-                  className="um-input"
-                  name="password"
-                  type="password"
-                  value={form.password}
-                  onChange={handleFormChange}
-                  placeholder="Min. 8 characters"
-                />
+                <input className="um-input" name="password" type="password" value={form.password} onChange={handleFormChange} placeholder="Min. 8 characters" />
               </div>
               <div className="um-field">
                 <label className="um-label">Confirm Password</label>
-                <input
-                  className="um-input"
-                  name="confirmPassword"
-                  type="password"
-                  value={form.confirmPassword}
-                  onChange={handleFormChange}
-                  placeholder="Re-enter password"
-                />
+                <input className="um-input" name="confirmPassword" type="password" value={form.confirmPassword} onChange={handleFormChange} placeholder="Re-enter password" />
               </div>
             </div>
 
             <div className="um-form-row um-form-row--footer">
-              <div className="um-field um-field--role">
-                <label className="um-label">Role</label>
-                <select
-                  className="um-select"
-                  name="role"
-                  value={form.role}
-                  onChange={handleFormChange}
-                >
-                  {ROLES.map((r) => (
-                    <option key={r} value={r}>
-                      {r.charAt(0).toUpperCase() + r.slice(1)}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
+              <div />
               <div className="um-form-actions">
                 {formError && <span className="um-form-error">{formError}</span>}
-                <button
-                  className="um-submit-btn"
-                  onClick={handleSubmit}
-                  disabled={submitting}
-                >
+                <button className="um-submit-btn" onClick={handleSubmit} disabled={submitting}>
                   {submitting ? 'Creating…' : 'Create User'}
                 </button>
               </div>
@@ -217,8 +259,9 @@ export default function UserManagement() {
                 <th>Username</th>
                 <th>Email</th>
                 <th>Role</th>
+                <th>Device</th>
+                <th>Group</th>
                 <th>Status</th>
-                <th>Created</th>
                 <th></th>
               </tr>
             </thead>
@@ -232,20 +275,15 @@ export default function UserManagement() {
                   <td className="um-cell-muted">{u.email}</td>
                   <td>
                     <span className={`um-role-badge ${ROLE_BADGE[u.role] || 'role-viewer'}`}>
-                      {u.role}
+                      {(u.role || '').replace(/_/g, ' ')}
                     </span>
                   </td>
+                  <td className="um-cell-muted">{u.device_uuid || '—'}</td>
+                  <td className="um-cell-muted">{u.group_name || '—'}</td>
                   <td>
                     <span className={`um-status-dot ${u.is_active ? 'dot--active' : 'dot--inactive'}`}>
                       {u.is_active ? 'Active' : 'Inactive'}
                     </span>
-                  </td>
-                  <td className="um-cell-muted">
-                    {new Date(u.created_at).toLocaleDateString('en-IN', {
-                      day: '2-digit',
-                      month: 'short',
-                      year: 'numeric',
-                    })}
                   </td>
                   <td>
                     <button
