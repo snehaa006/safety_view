@@ -19,6 +19,19 @@ function isAdmin(role) {
   return (role || '').toUpperCase() === 'ADMIN';
 }
 
+// Read device_ids explicitly assigned to a user via the user_devices join
+// table. Returns [] if the table doesn't exist yet (pre-migration) so the app
+// keeps working with the group fallback.
+async function getUserDeviceIds(userId) {
+  if (userId == null) return [];
+  const { data, error } = await supabase
+    .from('user_devices')
+    .select('device_id')
+    .eq('user_id', userId);
+  if (error) return [];
+  return (data ?? []).map((r) => r.device_id).filter((x) => x != null);
+}
+
 // ---------------------------------------------------------------------------
 // Auth
 // ---------------------------------------------------------------------------
@@ -111,6 +124,27 @@ export async function fetchGroups() {
 // ---------------------------------------------------------------------------
 
 export async function fetchDevices(user) {
+  // Access rule:
+  //   • ADMIN     → every device.
+  //   • non-admin → exactly the devices assigned to them in user_devices.
+  //                 If none are assigned (or the table doesn't exist yet),
+  //                 fall back to all devices in their group, then their single
+  //                 device, then nothing.
+  let allowedIds = null; // null = no restriction (admin)
+  if (!isAdmin(user?.role)) {
+    let ids = await getUserDeviceIds(user?.id);
+    if (ids.length === 0 && user?.group_id != null) {
+      const { data: groupDevices } = await supabase
+        .from('devices')
+        .select('id')
+        .eq('group_id', user.group_id);
+      ids = (groupDevices ?? []).map((r) => r.id);
+    }
+    if (ids.length === 0 && user?.device_id != null) ids = [user.device_id];
+    if (ids.length === 0) return [];
+    allowedIds = ids;
+  }
+
   let query = supabase
     .from('devices')
     .select(`
@@ -125,19 +159,7 @@ export async function fetchDevices(user) {
     `)
     .order('id', { ascending: true });
 
-  // Access rule:
-  //   • ADMIN     → every device.
-  //   • non-admin → every device in their group (users.group_id). Falls back
-  //     to their single assigned device, or nothing, if they have no group.
-  if (!isAdmin(user?.role)) {
-    if (user?.group_id != null) {
-      query = query.eq('group_id', user.group_id);
-    } else if (user?.device_id != null) {
-      query = query.eq('id', user.device_id);
-    } else {
-      return [];
-    }
-  }
+  if (allowedIds) query = query.in('id', allowedIds);
 
   const { data: devices, error } = await query;
   if (error) throw new Error(error.message);
@@ -167,16 +189,15 @@ export async function fetchDevices(user) {
   }
 
   // Derive the real assignment status: a device is ASSIGNED if at least one
-  // user references it via users.device_id, otherwise NOT_ASSIGNED. This is
-  // computed on read so the badge can never drift from reality.
+  // user is linked to it — either through the user_devices join table or as a
+  // primary users.device_id. Computed on read so the badge can't drift.
   const assignedSet = new Set();
-  const { data: assignedRows } = await supabase
-    .from('users')
-    .select('device_id')
-    .in('device_id', deviceIds);
-  for (const r of assignedRows ?? []) {
-    if (r.device_id != null) assignedSet.add(r.device_id);
-  }
+  const [{ data: udRows }, { data: primaryRows }] = await Promise.all([
+    supabase.from('user_devices').select('device_id').in('device_id', deviceIds),
+    supabase.from('users').select('device_id').in('device_id', deviceIds),
+  ]);
+  for (const r of udRows ?? []) if (r.device_id != null) assignedSet.add(r.device_id);
+  for (const r of primaryRows ?? []) if (r.device_id != null) assignedSet.add(r.device_id);
 
   return devices.map((d) => ({
     id: d.id,
@@ -386,10 +407,22 @@ export async function fetchUsers() {
 
   if (error) throw new Error(error.message);
 
+  // Assigned devices per user (from the join table). Tolerates the table not
+  // existing yet (pre-migration) by leaving the lists empty.
+  const byUser = {};
+  const { data: udRows } = await supabase
+    .from('user_devices')
+    .select('user_id, device_id, devices ( device_uuid )');
+  for (const r of udRows ?? []) {
+    (byUser[r.user_id] ??= []).push({ id: r.device_id, uuid: r.devices?.device_uuid ?? null });
+  }
+
   return (data ?? []).map((u) => ({
     ...u,
     device_uuid: u.devices?.device_uuid ?? null,
     group_name: u.groups?.group_name ?? null,
+    assigned_device_ids: (byUser[u.id] ?? []).map((d) => d.id),
+    assigned_device_uuids: (byUser[u.id] ?? []).map((d) => d.uuid).filter(Boolean),
   }));
 }
 
@@ -427,24 +460,54 @@ export async function createUser({
   });
 
   if (error) throw new Error(error.message);
-  return data ?? { username };
+
+  // The RPC returns void, so look up the new user's id for follow-up device
+  // assignment.
+  const { data: row } = await supabase
+    .from('users')
+    .select('id')
+    .eq('username', username)
+    .single();
+  return { id: row?.id, username };
 }
 
-export async function updateUser(userId, { role, device_id, group_id }) {
+export async function updateUser(userId, fields) {
+  const { role, email, device_id, group_id, first_name, last_name, mobile_no } = fields;
   const patch = {};
   if (role !== undefined) patch.role = role;
+  if (email !== undefined) patch.email = email || null;
   if (device_id !== undefined) patch.device_id = device_id || null;
   if (group_id !== undefined) patch.group_id = group_id || null;
+  if (first_name !== undefined) patch.first_name = first_name || null;
+  if (last_name !== undefined) patch.last_name = last_name || null;
+  if (mobile_no !== undefined) patch.mobile_no = mobile_no || null;
 
   const { data, error } = await supabase
     .from('users')
     .update(patch)
     .eq('id', userId)
-    .select('id, role, device_id, group_id')
+    .select('id')
     .single();
 
   if (error) throw new Error(error.message);
   return data;
+}
+
+// Replace the full set of devices assigned to a user (many-to-many).
+export async function setUserDevices(userId, deviceIds) {
+  const { error: delErr } = await supabase
+    .from('user_devices')
+    .delete()
+    .eq('user_id', userId);
+  if (delErr) throw new Error(delErr.message);
+
+  const ids = (deviceIds ?? []).filter((x) => x != null);
+  if (ids.length === 0) return { userId, deviceIds: [] };
+
+  const rows = ids.map((device_id) => ({ user_id: userId, device_id }));
+  const { error: insErr } = await supabase.from('user_devices').insert(rows);
+  if (insErr) throw new Error(insErr.message);
+  return { userId, deviceIds: ids };
 }
 
 export async function toggleUserActive(userId, isActive) {
