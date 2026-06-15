@@ -158,11 +158,28 @@ export async function fetchDevices(user) {
     else if (status === 'FAULT') s.faults += 1;
   }
 
+  // Derive the real assignment status: a device is ASSIGNED if at least one
+  // user references it via users.device_id, otherwise NOT_ASSIGNED. This is
+  // computed on read so the badge can never drift from reality.
+  const assignedSet = new Set();
+  if (isAdmin(user?.role)) {
+    const { data: assignedRows } = await supabase
+      .from('users')
+      .select('device_id')
+      .in('device_id', deviceIds);
+    for (const r of assignedRows ?? []) {
+      if (r.device_id != null) assignedSet.add(r.device_id);
+    }
+  } else if (user?.device_id != null) {
+    // A non-admin only sees their own assigned device, so it is assigned.
+    assignedSet.add(user.device_id);
+  }
+
   return devices.map((d) => ({
     id: d.id,
     device_uuid: d.device_uuid,
     device_remarks: d.device_remarks,
-    status: d.status,
+    status: assignedSet.has(d.id) ? 'ASSIGNED' : 'NOT_ASSIGNED',
     group_id: d.group_id,
     group_name: d.groups?.group_name ?? null,
     updated_at: d.updated_at,

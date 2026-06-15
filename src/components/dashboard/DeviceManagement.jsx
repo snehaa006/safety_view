@@ -9,12 +9,9 @@ import {
 import { useAuth } from '../../context/AuthContext';
 import './DeviceManagement.css';
 
-const STATUSES = ['NOT_ASSIGNED', 'ASSIGNED'];
-
 const EMPTY_FORM = {
   device_uuid: '',
   device_remarks: '',
-  status: 'NOT_ASSIGNED',
   group_id: '',
 };
 
@@ -70,7 +67,6 @@ export default function DeviceManagement({ onChanged }) {
     setForm({
       device_uuid: d.device_uuid,
       device_remarks: d.device_remarks || '',
-      status: d.status || 'NOT_ASSIGNED',
       group_id: d.group_id ? String(d.group_id) : '',
     });
     setFormError('');
@@ -92,7 +88,6 @@ export default function DeviceManagement({ onChanged }) {
 
     const payload = {
       device_remarks: form.device_remarks.trim(),
-      status: form.status,
       group_id: form.group_id ? Number(form.group_id) : null,
     };
 
@@ -178,14 +173,6 @@ export default function DeviceManagement({ onChanged }) {
 
             <div className="dm-form-row dm-form-row--footer">
               <div className="dm-field">
-                <label className="dm-label">Status</label>
-                <select className="dm-select" name="status" value={form.status} onChange={handleFormChange}>
-                  {STATUSES.map((s) => (
-                    <option key={s} value={s}>{s.replace('_', ' ')}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="dm-field">
                 <label className="dm-label">Group</label>
                 <select className="dm-select" name="group_id" value={form.group_id} onChange={handleFormChange}>
                   <option value="">— No group —</option>
@@ -202,6 +189,11 @@ export default function DeviceManagement({ onChanged }) {
                 </button>
               </div>
             </div>
+
+            <p className="dm-form-note">
+              Status is set automatically: a device shows <strong>Assigned</strong> once
+              it is assigned to a user, otherwise <strong>Not assigned</strong>.
+            </p>
           </div>
         </div>
       )}
