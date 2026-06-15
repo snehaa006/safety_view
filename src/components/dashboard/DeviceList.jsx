@@ -11,7 +11,7 @@ export default function DeviceList({ devices, onOpen, isAdmin }) {
       <div className="device-list-empty">
         {isAdmin
           ? 'No devices yet. Add one from Device Management.'
-          : 'No device has been assigned to your account yet. Please contact your administrator.'}
+          : 'No devices are available for your group yet. Please contact your administrator.'}
       </div>
     );
   }
@@ -19,7 +19,7 @@ export default function DeviceList({ devices, onOpen, isAdmin }) {
   return (
     <section className="device-list-section">
       <div className="device-list-header">
-        <h3>{isAdmin ? 'All Devices' : 'Your Device'}</h3>
+        <h3>{isAdmin ? 'All Devices' : 'Your Devices'}</h3>
         <p className="device-list-subtitle">
           Tap a device to open its dashboard and view all 16 zones
         </p>

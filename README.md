@@ -30,7 +30,8 @@ Postgres RPC (pgcrypto).
 - **Login** → the app reads the user's `role`, `device_id` and `group_id`.
 - **Devices view** (landing page):
   - `ADMIN` sees **every** device.
-  - Any other role sees **only their single assigned device** (`users.device_id`).
+  - Any other role sees **every device in their group** (`users.group_id`), so a
+    user assigned to a group can open and view all of that group's devices.
 - **Click a device** → opens its dashboard: summary cards, water/pressure
   charts, recent events, and the device's 16 zones. Tap a zone for full sensor
   detail.
