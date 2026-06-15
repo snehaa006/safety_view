@@ -87,9 +87,17 @@
 }
 
 .dm-form-row--footer {
-  grid-template-columns: 1fr 1fr auto;
+  grid-template-columns: 1fr auto;
   align-items: flex-end;
 }
+
+.dm-form-note {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--color-text-muted);
+}
+
+.dm-form-note strong { color: var(--color-text-secondary); }
 
 .dm-field {
   display: flex;
