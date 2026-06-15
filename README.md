@@ -1,22 +1,44 @@
-# Fire & Water Safety Dashboard (React)
+# SafetyView — Fire & Water Safety Dashboard (React)
 
-A modular React dashboard for monitoring fire and water safety sensors across
-16 zones of a building, matching the tech stack: React frontend, FastAPI
-backend (planned), PostgreSQL database, JWT auth.
+A modular React dashboard for monitoring fire and water safety devices.
+Stack: React + Vite frontend, Supabase (PostgreSQL via PostgREST), JWT-style
+session in `localStorage`.
+
+It is built against **SafetyView schema v4**:
+
+```
+groups → devices → zones (exactly 16 per device) → zone_status
+users are assigned ONE device (users.device_id) inside a group.
+```
+
+There are no `buildings` / `panels` tables — zones belong directly to a device.
 
 ## Getting started
 
 ```bash
 npm install
+cp .env.example .env   # fill in VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY
 npm run dev
 ```
 
-Open http://localhost:5173 and log in with:
+Open http://localhost:5173 and sign in with a username/password that exists in
+the `users` table. Passwords are verified server-side by the `check_password`
+Postgres RPC (pgcrypto).
 
-- **Username:** `John`
-- **Password:** `fire@123`
+## How it works
 
-(Second demo account: `admin` / `admin@123`)
+- **Login** → the app reads the user's `role`, `device_id` and `group_id`.
+- **Devices view** (landing page):
+  - `ADMIN` sees **every** device.
+  - Any other role sees **only their single assigned device** (`users.device_id`).
+- **Click a device** → opens its dashboard: summary cards, water/pressure
+  charts, recent events, and the device's 16 zones. Tap a zone for full sensor
+  detail.
+- **Device Management** (admin only) → add / edit / delete devices, set status
+  (`ASSIGNED` / `NOT_ASSIGNED`) and assign a group.
+- **User Management** (admin only) → create users and assign them a role,
+  group and device. The DB trigger requires a user's device to belong to the
+  user's group, so the form keeps the two consistent.
 
 ## Folder structure
 
@@ -25,68 +47,36 @@ src/
   components/
     auth/           Login page, route guard
     layout/         Sidebar, Topbar, page shell
-    dashboard/      Summary cards, zone cards/grid, charts, events log
-  context/          AuthContext (JWT session state)
-  pages/            DashboardPage (view switching: overview/fire/water/events)
+    dashboard/      Summary cards, device list, device & user management,
+                    zone grid/tiles, charts, events log
+  context/          AuthContext (session state incl. device_id / group_id)
+  pages/            DashboardPage (devices → device dashboard, admin panels)
   services/
-    api.js          All data fetching — currently mocked, swap USE_MOCK=false
-                     to hit the real FastAPI backend
-    mockData.js     16-zone hardcoded sample data
+    supabase.js     Supabase client
+    api.js          All data access against schema v4
   utils/            Status colors, formatting helpers
   styles/           Global design tokens (colors, spacing, fonts)
 ```
 
-## How the 16-zone data model was derived
+## Data access (`src/services/api.js`)
 
-Two reference snippets were provided:
+Key functions, all scoped to the v4 schema:
 
-1. **Postgres schema** — `sensor_readings` table stores per-zone:
-   `temperature`, `smoke_level`, `battery_level`, `power_status`,
-   `communication_status`, linked to a `zone_id`.
+- `login(username, password)` — `check_password` RPC + profile lookup.
+- `fetchDevices(user)` — devices visible to the user (admin = all, else their
+  assigned device), each with a live fire/fault zone summary.
+- `fetchZonesByDevice(id)` — a device's 16 zones + `zone_status` + the latest
+  `sensor_readings` row per zone.
+- `fetchEventsByDevice(id)` / `acknowledgeEvent(id)`.
+- `fetchGroups()`, `createDevice` / `updateDevice` / `deleteDevice`.
+- `fetchUsers`, `createUser` (RPC `create_user_with_password` + profile patch),
+  `updateUser`, `toggleUserActive`.
 
-2. **Arduino code** — each zone's microcontroller reads:
-   ```c
-   int rawWL = analogRead(A0);          // water level sensor
-   int rawP  = analogRead(A1);          // pressure sensor
-   int waterLevel = map(rawWL, 0, 1023, 0, 100);  // -> 0-100%
-   float pressure = (rawP * 10.0) / 1023.0;       // -> 0-10 bar
-   bool fire  = !digitalRead(FIRE_IN);   // active-LOW fire sensor
-   bool fault = !digitalRead(FAULT_IN);  // active-LOW fault sensor
-   ```
-
-**Interpretation used in this dashboard:** each of the 16 zones is its own
-sensor unit and reports *all* of these fields together — water level,
-pressure, fire flag, fault flag, temperature, smoke index, battery level,
-power status, and communication status. This matches "16 zones" as 16 rows
-in `zones`, each with a corresponding latest row in `sensor_readings` plus
-the two extra Arduino-derived fields (waterLevel %, pressure bar).
-
-If your real database stores water/pressure separately from the fire panel
-sensors (e.g. two different device types per zone), the shape in
-`mockData.js` / `api.js` can be split into two parallel arrays without
-touching any UI components — `ZoneCard` just reads `zone.sensors.*`.
-
-## Connecting to the real backend
-
-In `src/services/api.js`:
-
-1. Set `USE_MOCK = false`
-2. Set `API_BASE_URL` to your Nginx-proxied FastAPI path
-3. Implement these endpoints server-side:
-   - `POST /auth/login` → `{ access_token, user }` (JWT, validated against
-     the `users` table with bcrypt)
-   - `GET /buildings/1`
-   - `GET /panels/FACP_001`
-   - `GET /panels/FACP_001/zones` — joins `zones` + latest `sensor_readings`
-   - `GET /events?acknowledged=false`
-   - `GET /panels/FACP_001/summary`
-   - `POST /events/{id}/acknowledge`
-
-No component code needs to change — they all consume the same shapes
-already returned by the mock functions.
+No component code needs to change to point at a different backend as long as
+these functions return the same shapes.
 
 ## Theme
 
-White background (`--color-bg`, `--color-surface`) with light accent boxes
-for status (water = light blue, fire = light orange/red, fault = light
-amber, normal = light green). All tokens live in `src/styles/global.css`.
+White background with light accent boxes for status (water = light blue,
+fire = light orange/red, fault = light amber, normal = light green). All tokens
+live in `src/styles/global.css`.

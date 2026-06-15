@@ -69,6 +69,20 @@
   color: var(--color-water-text);
 }
 
+.sidebar-nav-group-label {
+  margin: var(--space-3) 12px var(--space-1);
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
+  border-top: 1px solid var(--color-border);
+  padding-top: var(--space-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .sidebar-footer {
   padding: var(--space-4) var(--space-5);
   border-top: 1px solid var(--color-border);

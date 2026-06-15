@@ -1,14 +1,23 @@
 // ---------------------------------------------------------------------------
 // API service layer — Supabase (PostgreSQL via PostgREST)
 //
-// All exported function signatures are IDENTICAL to the previous mock version,
-// so no component needs to change.  Data shapes are normalised to match what
-// the rest of the app already expects.
+// Matches SafetyView schema v4:
+//   groups → devices → zones (exactly 16 per device) → zone_status
+//   users are assigned ONE device (users.device_id) inside a group.
+//   buildings / panels tables no longer exist.
+//
+// Access rule (enforced here at the app layer):
+//   • ADMIN  → sees every device.
+//   • others → see ONLY their assigned device (users.device_id) and its zones.
 // ---------------------------------------------------------------------------
 
 import { supabase } from './supabase';
 
 const AUTH_TOKEN_KEY = 'fwd_auth_token';
+
+function isAdmin(role) {
+  return (role || '').toUpperCase() === 'ADMIN';
+}
 
 // ---------------------------------------------------------------------------
 // Auth
@@ -25,17 +34,43 @@ export async function login(username, password) {
   if (error) throw new Error(error.message);
   if (!data || data.length === 0) throw new Error('Invalid username or password');
 
-  const user = data[0];
+  const account = data[0];
+
+  // The RPC only returns identity columns; pull the rest of the profile
+  // (assigned device + group) from the users table so the app knows what
+  // this user is allowed to see.
+  let profile = {};
+  const { data: profileRow } = await supabase
+    .from('users')
+    .select('id, username, email, role, device_id, group_id, first_name, last_name')
+    .eq('id', account.id)
+    .single();
+  if (profileRow) profile = profileRow;
+
+  const user = {
+    id: account.id,
+    username: account.username,
+    role: account.role ?? profile.role,
+    email: account.email ?? profile.email,
+    device_id: profile.device_id ?? null,
+    group_id: profile.group_id ?? null,
+    first_name: profile.first_name ?? null,
+    last_name: profile.last_name ?? null,
+  };
 
   const token = `supabase.${btoa(
-    JSON.stringify({ sub: user.username, role: user.role, id: user.id, exp: Date.now() + 8 * 60 * 60 * 1000 })
+    JSON.stringify({
+      sub: user.username,
+      role: user.role,
+      id: user.id,
+      device_id: user.device_id,
+      group_id: user.group_id,
+      exp: Date.now() + 8 * 60 * 60 * 1000,
+    })
   )}.sig`;
 
   localStorage.setItem(AUTH_TOKEN_KEY, token);
-  return {
-    token,
-    user: { username: user.username, role: user.role, email: user.email },
-  };
+  return { token, user };
 }
 
 export function logout() {
@@ -55,52 +90,137 @@ export function decodeToken(token) {
 }
 
 // ---------------------------------------------------------------------------
-// Building
+// Groups
 // ---------------------------------------------------------------------------
 
-export async function fetchBuilding() {
+export async function fetchGroups() {
   const { data, error } = await supabase
-    .from('buildings')
-    .select('*')
-    .eq('id', 1)
-    .single();
+    .from('groups')
+    .select('id, group_name, description')
+    .order('group_name', { ascending: true });
 
   if (error) throw new Error(error.message);
   return data;
 }
 
 // ---------------------------------------------------------------------------
-// Panel
+// Devices
+//
+// Returns the devices a user is allowed to see, each enriched with its group
+// name and a live alarm summary (fire / fault counts across its 16 zones).
 // ---------------------------------------------------------------------------
 
-export async function fetchPanel() {
+export async function fetchDevices(user) {
+  let query = supabase
+    .from('devices')
+    .select(`
+      id,
+      device_uuid,
+      device_remarks,
+      status,
+      group_id,
+      updated_at,
+      created_at,
+      groups ( group_name )
+    `)
+    .order('id', { ascending: true });
+
+  // Non-admins only ever see their single assigned device.
+  if (!isAdmin(user?.role)) {
+    if (!user?.device_id) return [];
+    query = query.eq('id', user.device_id);
+  }
+
+  const { data: devices, error } = await query;
+  if (error) throw new Error(error.message);
+  if (!devices || devices.length === 0) return [];
+
+  // Pull a live status snapshot for every zone of these devices so each
+  // device card can show how many zones are in fire / fault.
+  const deviceIds = devices.map((d) => d.id);
+  const { data: zoneRows, error: zoneErr } = await supabase
+    .from('zones')
+    .select('device_id, zone_status ( status )')
+    .in('device_id', deviceIds);
+
+  if (zoneErr) throw new Error(zoneErr.message);
+
+  const summaryByDevice = {};
+  for (const id of deviceIds) {
+    summaryByDevice[id] = { totalZones: 0, fireAlarms: 0, faults: 0 };
+  }
+  for (const z of zoneRows ?? []) {
+    const s = summaryByDevice[z.device_id];
+    if (!s) continue;
+    s.totalZones += 1;
+    const status = z.zone_status?.[0]?.status ?? z.zone_status?.status ?? 'NORMAL';
+    if (status === 'FIRE_ALARM') s.fireAlarms += 1;
+    else if (status === 'FAULT') s.faults += 1;
+  }
+
+  return devices.map((d) => ({
+    id: d.id,
+    device_uuid: d.device_uuid,
+    device_remarks: d.device_remarks,
+    status: d.status,
+    group_id: d.group_id,
+    group_name: d.groups?.group_name ?? null,
+    updated_at: d.updated_at,
+    created_at: d.created_at,
+    summary: summaryByDevice[d.id] ?? { totalZones: 0, fireAlarms: 0, faults: 0 },
+  }));
+}
+
+export async function createDevice({ device_uuid, device_remarks, status, group_id }) {
   const { data, error } = await supabase
-    .from('panels')
-    .select('*')
-    .eq('panel_code', 'FACP_001')
+    .from('devices')
+    .insert({
+      device_uuid,
+      device_remarks: device_remarks || null,
+      status: status || 'NOT_ASSIGNED',
+      group_id: group_id || null,
+    })
+    .select('id, device_uuid')
     .single();
 
   if (error) throw new Error(error.message);
-  return {
-    id: data.id,
-    panel_id: data.panel_code,
-    panel_name: data.panel_name,
-    panel_type: data.panel_type,
-    status: data.status,
-    last_seen: data.last_seen,
-  };
+  return data;
+}
+
+export async function updateDevice(id, { device_remarks, status, group_id }) {
+  const patch = { updated_at: new Date().toISOString() };
+  if (device_remarks !== undefined) patch.device_remarks = device_remarks;
+  if (status !== undefined) patch.status = status;
+  if (group_id !== undefined) patch.group_id = group_id || null;
+
+  const { data, error } = await supabase
+    .from('devices')
+    .update(patch)
+    .eq('id', id)
+    .select('id')
+    .single();
+
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+export async function deleteDevice(id) {
+  const { error } = await supabase.from('devices').delete().eq('id', id);
+  if (error) throw new Error(error.message);
+  return { id };
 }
 
 // ---------------------------------------------------------------------------
-// Zones  (joins zones + zone_status + latest sensor_reading per zone)
+// Zones for a device  (zones + zone_status + latest sensor_reading per zone)
 // ---------------------------------------------------------------------------
 
-export async function fetchZones() {
-  // 1. Fetch all zones with their current status snapshot
+export async function fetchZonesByDevice(deviceId) {
+  // 1. All 16 zones of this device with their current status snapshot
   const { data: zonesData, error: zonesError } = await supabase
     .from('zones')
     .select(`
       id,
+      device_id,
       zone_number,
       zone_name,
       floor_name,
@@ -111,22 +231,25 @@ export async function fetchZones() {
         updated_at
       )
     `)
+    .eq('device_id', deviceId)
     .order('zone_number', { ascending: true });
 
   if (zonesError) throw new Error(zonesError.message);
+  if (!zonesData || zonesData.length === 0) return [];
 
-  // 2. Fetch latest sensor reading for each zone (for temperature, smoke, battery, etc.)
+  // 2. Latest sensor reading per zone (temperature, smoke, battery, comms…)
   const { data: readings, error: readingsError } = await supabase
     .from('sensor_readings')
-    .select('zone_id, temperature, smoke_index, fire_detected, fault_detected, battery_level, power_status, communication_status, created_at')
+    .select(
+      'zone_id, temperature, smoke_index, fire_detected, fault_detected, battery_level, power_status, communication_status, created_at'
+    )
     .in('zone_id', zonesData.map((z) => z.id))
     .order('created_at', { ascending: false });
 
   if (readingsError) throw new Error(readingsError.message);
 
-  // Keep only the most-recent reading per zone
   const latestReadingByZone = {};
-  for (const r of readings) {
+  for (const r of readings ?? []) {
     if (!latestReadingByZone[r.zone_id]) latestReadingByZone[r.zone_id] = r;
   }
 
@@ -140,12 +263,12 @@ export async function fetchZones() {
     const commStatus = reading.communication_status ?? 'ONLINE';
 
     let status = snap.status ?? 'NORMAL';
-    // Normalise status values between schema variants
     if (status === 'FIRE_ALARM') status = 'ALARM';
+    else if (status === 'NORMAL' && commStatus === 'OFFLINE') status = 'OFFLINE';
 
     return {
-      id: z.zone_number,
-      panel_id: 1,
+      id: z.id,
+      device_id: z.device_id,
       zone_number: z.zone_number,
       zone_name: z.zone_name,
       floor_name: z.floor_name,
@@ -167,15 +290,15 @@ export async function fetchZones() {
 }
 
 // ---------------------------------------------------------------------------
-// Events
+// Events for a device
 // ---------------------------------------------------------------------------
 
-export async function fetchEvents() {
+export async function fetchEventsByDevice(deviceId) {
   const { data, error } = await supabase
     .from('events')
     .select(`
       id,
-      panel_id,
+      device_id,
       zone_id,
       event_type,
       severity,
@@ -185,14 +308,15 @@ export async function fetchEvents() {
       created_at,
       zones ( zone_name )
     `)
+    .eq('device_id', deviceId)
     .order('created_at', { ascending: false })
     .limit(20);
 
   if (error) throw new Error(error.message);
 
-  return data.map((e) => ({
+  return (data ?? []).map((e) => ({
     id: e.id,
-    panel_id: e.panel_id,
+    device_id: e.device_id,
     zone_id: e.zone_id,
     zone_name: e.zones?.zone_name ?? `Zone ${e.zone_id}`,
     event_type: e.event_type,
@@ -204,13 +328,14 @@ export async function fetchEvents() {
 }
 
 // ---------------------------------------------------------------------------
-// Summary (computed from live zone data)
+// Summary for a device (computed from its live zone data)
 // ---------------------------------------------------------------------------
 
-export async function fetchSummary() {
-  const zones = await fetchZones();
-
+export function summariseZones(zones) {
   const totalZones = zones.length;
+  if (totalZones === 0) {
+    return { totalZones: 0, fireAlarms: 0, faults: 0, offline: 0, avgWaterLevel: 0, avgPressure: 0 };
+  }
   const fireAlarms = zones.filter((z) => z.sensors.fire || z.status === 'ALARM').length;
   const faults = zones.filter((z) => z.sensors.fault || z.status === 'FAULT').length;
   const offline = zones.filter((z) => z.sensors.communicationStatus === 'OFFLINE').length;
@@ -230,22 +355,77 @@ export async function fetchSummary() {
 export async function fetchUsers() {
   const { data, error } = await supabase
     .from('users')
-    .select('id, username, email, role, is_active, created_at')
+    .select(`
+      id, username, email, role, is_active, created_at,
+      first_name, last_name, mobile_no, org_name,
+      device_id, group_id,
+      devices ( device_uuid ),
+      groups ( group_name )
+    `)
     .order('created_at', { ascending: false });
 
   if (error) throw new Error(error.message);
-  return data;
+
+  return (data ?? []).map((u) => ({
+    ...u,
+    device_uuid: u.devices?.device_uuid ?? null,
+    group_name: u.groups?.group_name ?? null,
+  }));
 }
 
-export async function createUser({ username, email, password, role }) {
-  // Hash the password server-side using pgcrypto via RPC — the plain-text
-  // password never touches the DB directly.
-  const { data, error } = await supabase.rpc('create_user_with_password', {
+export async function createUser({
+  username,
+  email,
+  password,
+  role,
+  device_id,
+  group_id,
+  first_name,
+  last_name,
+  mobile_no,
+}) {
+  // 1. Create the account with a server-side hashed password via the RPC.
+  const { error: rpcError } = await supabase.rpc('create_user_with_password', {
     p_username: username,
     p_email: email,
     p_password: password,
     p_role: role,
   });
+  if (rpcError) throw new Error(rpcError.message);
+
+  // 2. Attach the v4 profile fields (assigned device + group + details).
+  //    A DB trigger requires the device's group to match the user's group,
+  //    so the caller passes a consistent pair.
+  const patch = {};
+  if (device_id !== undefined) patch.device_id = device_id || null;
+  if (group_id !== undefined) patch.group_id = group_id || null;
+  if (first_name !== undefined) patch.first_name = first_name || null;
+  if (last_name !== undefined) patch.last_name = last_name || null;
+  if (mobile_no !== undefined) patch.mobile_no = mobile_no || null;
+
+  if (Object.keys(patch).length > 0) {
+    const { error: updErr } = await supabase
+      .from('users')
+      .update(patch)
+      .eq('username', username);
+    if (updErr) throw new Error(updErr.message);
+  }
+
+  return { username };
+}
+
+export async function updateUser(userId, { role, device_id, group_id }) {
+  const patch = {};
+  if (role !== undefined) patch.role = role;
+  if (device_id !== undefined) patch.device_id = device_id || null;
+  if (group_id !== undefined) patch.group_id = group_id || null;
+
+  const { data, error } = await supabase
+    .from('users')
+    .update(patch)
+    .eq('id', userId)
+    .select('id, role, device_id, group_id')
+    .single();
 
   if (error) throw new Error(error.message);
   return data;
