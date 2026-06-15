@@ -30,16 +30,20 @@ Postgres RPC (pgcrypto).
 - **Login** → the app reads the user's `role`, `device_id` and `group_id`.
 - **Devices view** (landing page):
   - `ADMIN` sees **every** device.
-  - Any other role sees **every device in their group** (`users.group_id`), so a
-    user assigned to a group can open and view all of that group's devices.
+  - Any other role sees **exactly the devices assigned to them** via the
+    `user_devices` join table (a hand-picked subset of their group). If a user
+    has no explicit assignments yet, the app falls back to all devices in their
+    group, then their single `device_id`.
+- **User Management** (admin) → create/edit users and tick **one or more
+  devices** from the user's group to grant access. Assignments live in
+  `user_devices`; the first ticked device is also stored as the primary
+  `users.device_id`.
 - **Click a device** → opens its dashboard: summary cards, water/pressure
   charts, recent events, and the device's 16 zones. Tap a zone for full sensor
   detail.
-- **Device Management** (admin only) → add / edit / delete devices, set status
-  (`ASSIGNED` / `NOT_ASSIGNED`) and assign a group.
-- **User Management** (admin only) → create users and assign them a role,
-  group and device. The DB trigger requires a user's device to belong to the
-  user's group, so the form keeps the two consistent.
+- **Device Management** (admin only) → add / edit / delete devices and assign a
+  group. A device's `ASSIGNED` / `NOT_ASSIGNED` badge is derived automatically
+  from whether any user is linked to it.
 
 ## Folder structure
 

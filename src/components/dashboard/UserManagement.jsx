@@ -2,7 +2,9 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   fetchUsers,
   createUser,
+  updateUser,
   toggleUserActive,
+  setUserDevices,
   fetchGroups,
   fetchDevices,
 } from '../../services/api';
@@ -28,7 +30,7 @@ const EMPTY_FORM = {
   mobile_no: '',
   role: 'VIEWER',
   group_id: '',
-  device_id: '',
+  deviceIds: [],
 };
 
 export default function UserManagement() {
@@ -39,11 +41,13 @@ export default function UserManagement() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
   const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
   const [formError, setFormError] = useState('');
 
   const [form, setForm] = useState(EMPTY_FORM);
+  const isEditing = editingId !== null;
 
   useEffect(() => {
     loadAll();
@@ -68,10 +72,9 @@ export default function UserManagement() {
     }
   }
 
-  // Devices selectable for the chosen group (the DB trigger requires the
-  // assigned device to belong to the same group as the user).
+  // Only devices in the chosen group can be assigned (must share the group).
   const devicesForGroup = useMemo(() => {
-    if (!form.group_id) return devices;
+    if (!form.group_id) return [];
     return devices.filter((d) => String(d.group_id) === String(form.group_id));
   }, [devices, form.group_id]);
 
@@ -79,20 +82,64 @@ export default function UserManagement() {
     const { name, value } = e.target;
     setForm((prev) => {
       const next = { ...prev, [name]: value };
-      // Changing the group invalidates a device from a different group.
-      if (name === 'group_id') next.device_id = '';
-      // Selecting a device auto-aligns the group to that device's group.
-      if (name === 'device_id' && value) {
-        const dev = devices.find((d) => String(d.id) === String(value));
-        if (dev && dev.group_id) next.group_id = String(dev.group_id);
+      if (name === 'group_id') {
+        // Keep only devices that still belong to the newly selected group.
+        const groupDevIds = devices
+          .filter((d) => String(d.group_id) === String(value))
+          .map((d) => d.id);
+        next.deviceIds = prev.deviceIds.filter((id) => groupDevIds.includes(id));
       }
       return next;
     });
     setFormError('');
   }
 
-  function resetForm() {
+  function toggleDevice(id) {
+    setForm((prev) => ({
+      ...prev,
+      deviceIds: prev.deviceIds.includes(id)
+        ? prev.deviceIds.filter((x) => x !== id)
+        : [...prev.deviceIds, id],
+    }));
+    setFormError('');
+  }
+
+  function openCreate() {
+    setEditingId(null);
     setForm(EMPTY_FORM);
+    setFormError('');
+    setSuccessMsg('');
+    setShowForm(true);
+  }
+
+  function openEdit(u) {
+    setEditingId(u.id);
+    setForm({
+      username: u.username,
+      email: u.email || '',
+      password: '',
+      confirmPassword: '',
+      first_name: u.first_name || '',
+      last_name: u.last_name || '',
+      mobile_no: u.mobile_no || '',
+      role: u.role || 'VIEWER',
+      group_id: u.group_id ? String(u.group_id) : '',
+      deviceIds: u.assigned_device_ids?.length
+        ? u.assigned_device_ids
+        : u.device_id
+        ? [u.device_id]
+        : [],
+    });
+    setFormError('');
+    setSuccessMsg('');
+    setShowForm(true);
+  }
+
+  function cancelForm() {
+    setShowForm(false);
+    setEditingId(null);
+    setForm(EMPTY_FORM);
+    setFormError('');
   }
 
   async function handleSubmit(e) {
@@ -103,28 +150,54 @@ export default function UserManagement() {
     if (!form.username.trim()) return setFormError('Username is required.');
     if (!form.email.trim()) return setFormError('Email is required.');
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) return setFormError('Enter a valid email.');
-    if (form.password.length < 8) return setFormError('Password must be at least 8 characters.');
-    if (form.password !== form.confirmPassword) return setFormError('Passwords do not match.');
+    if (!isEditing) {
+      if (form.password.length < 8) return setFormError('Password must be at least 8 characters.');
+      if (form.password !== form.confirmPassword) return setFormError('Passwords do not match.');
+    }
+
+    const primaryDevice = form.deviceIds[0] ?? null;
+    const groupId = form.group_id ? Number(form.group_id) : null;
 
     try {
       setSubmitting(true);
-      await createUser({
-        username: form.username.trim(),
-        email: form.email.trim(),
-        password: form.password,
-        role: form.role,
-        first_name: form.first_name.trim(),
-        last_name: form.last_name.trim(),
-        mobile_no: form.mobile_no.trim(),
-        group_id: form.group_id ? Number(form.group_id) : null,
-        device_id: form.device_id ? Number(form.device_id) : null,
-      });
-      setSuccessMsg(`User "${form.username}" created successfully.`);
-      resetForm();
-      setShowForm(false);
+      let userId = editingId;
+
+      if (isEditing) {
+        await updateUser(editingId, {
+          role: form.role,
+          email: form.email.trim(),
+          first_name: form.first_name.trim(),
+          last_name: form.last_name.trim(),
+          mobile_no: form.mobile_no.trim(),
+          group_id: groupId,
+          device_id: primaryDevice,
+        });
+      } else {
+        const created = await createUser({
+          username: form.username.trim(),
+          email: form.email.trim(),
+          password: form.password,
+          role: form.role,
+          first_name: form.first_name.trim(),
+          last_name: form.last_name.trim(),
+          mobile_no: form.mobile_no.trim(),
+          group_id: groupId,
+          device_id: primaryDevice,
+        });
+        userId = created.id;
+      }
+
+      if (userId != null) {
+        await setUserDevices(userId, form.deviceIds);
+      }
+
+      setSuccessMsg(
+        isEditing ? `User "${form.username}" updated.` : `User "${form.username}" created.`
+      );
+      cancelForm();
       await loadAll();
     } catch (err) {
-      setFormError(err.message || 'Failed to create user.');
+      setFormError(err.message || 'Failed to save user.');
     } finally {
       setSubmitting(false);
     }
@@ -145,17 +218,10 @@ export default function UserManagement() {
         <div>
           <h3 className="um-title">User Management</h3>
           <p className="um-subtitle">
-            Manage access and roles. A user sees every device in their assigned group.
+            Manage access and roles. Assign a user one or more devices from their group.
           </p>
         </div>
-        <button
-          className="um-add-btn"
-          onClick={() => {
-            setShowForm((v) => !v);
-            setFormError('');
-            setSuccessMsg('');
-          }}
-        >
+        <button className="um-add-btn" onClick={showForm ? cancelForm : openCreate}>
           {showForm ? <><span>✕</span> Cancel</> : <><span>+</span> Add User</>}
         </button>
       </div>
@@ -165,12 +231,12 @@ export default function UserManagement() {
 
       {showForm && (
         <div className="um-form-card">
-          <h4 className="um-form-title">New User</h4>
+          <h4 className="um-form-title">{isEditing ? `Edit User · ${form.username}` : 'New User'}</h4>
           <div className="um-form">
             <div className="um-form-row">
               <div className="um-field">
                 <label className="um-label">Username</label>
-                <input className="um-input" name="username" value={form.username} onChange={handleFormChange} placeholder="e.g. rajesh.sharma" autoComplete="off" />
+                <input className="um-input" name="username" value={form.username} onChange={handleFormChange} placeholder="e.g. rajesh.sharma" autoComplete="off" disabled={isEditing} />
               </div>
               <div className="um-field">
                 <label className="um-label">Email</label>
@@ -206,7 +272,7 @@ export default function UserManagement() {
 
             <div className="um-form-row">
               <div className="um-field">
-                <label className="um-label">Group (grants access to all its devices)</label>
+                <label className="um-label">Group</label>
                 <select className="um-select" name="group_id" value={form.group_id} onChange={handleFormChange}>
                   <option value="">— No group —</option>
                   {groups.map((g) => (
@@ -215,35 +281,50 @@ export default function UserManagement() {
                 </select>
               </div>
               <div className="um-field">
-                <label className="um-label">Primary Device (optional)</label>
-                <select className="um-select" name="device_id" value={form.device_id} onChange={handleFormChange}>
-                  <option value="">— No device —</option>
-                  {devicesForGroup.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {(d.device_remarks || d.device_uuid)} ({d.device_uuid})
-                    </option>
-                  ))}
-                </select>
+                <label className="um-label">Assigned Devices</label>
+                {!form.group_id ? (
+                  <div className="um-device-hint">Select a group first to choose devices.</div>
+                ) : devicesForGroup.length === 0 ? (
+                  <div className="um-device-hint">No devices in this group yet.</div>
+                ) : (
+                  <div className="um-device-list">
+                    {devicesForGroup.map((d) => (
+                      <label key={d.id} className="um-device-check">
+                        <input
+                          type="checkbox"
+                          checked={form.deviceIds.includes(d.id)}
+                          onChange={() => toggleDevice(d.id)}
+                        />
+                        <span>
+                          {(d.device_remarks || d.device_uuid)}
+                          <em>{d.device_uuid}</em>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
 
-            <div className="um-form-row">
-              <div className="um-field">
-                <label className="um-label">Password</label>
-                <input className="um-input" name="password" type="password" value={form.password} onChange={handleFormChange} placeholder="Min. 8 characters" />
+            {!isEditing && (
+              <div className="um-form-row">
+                <div className="um-field">
+                  <label className="um-label">Password</label>
+                  <input className="um-input" name="password" type="password" value={form.password} onChange={handleFormChange} placeholder="Min. 8 characters" />
+                </div>
+                <div className="um-field">
+                  <label className="um-label">Confirm Password</label>
+                  <input className="um-input" name="confirmPassword" type="password" value={form.confirmPassword} onChange={handleFormChange} placeholder="Re-enter password" />
+                </div>
               </div>
-              <div className="um-field">
-                <label className="um-label">Confirm Password</label>
-                <input className="um-input" name="confirmPassword" type="password" value={form.confirmPassword} onChange={handleFormChange} placeholder="Re-enter password" />
-              </div>
-            </div>
+            )}
 
             <div className="um-form-row um-form-row--footer">
               <div />
               <div className="um-form-actions">
                 {formError && <span className="um-form-error">{formError}</span>}
                 <button className="um-submit-btn" onClick={handleSubmit} disabled={submitting}>
-                  {submitting ? 'Creating…' : 'Create User'}
+                  {submitting ? 'Saving…' : isEditing ? 'Save Changes' : 'Create User'}
                 </button>
               </div>
             </div>
@@ -261,43 +342,57 @@ export default function UserManagement() {
                 <th>Username</th>
                 <th>Email</th>
                 <th>Role</th>
-                <th>Device</th>
+                <th>Devices</th>
                 <th>Group</th>
                 <th>Status</th>
                 <th></th>
               </tr>
             </thead>
             <tbody>
-              {users.map((u) => (
-                <tr key={u.id} className={!u.is_active ? 'um-row--inactive' : ''}>
-                  <td className="um-cell-user">
-                    <div className="um-avatar">{u.username.charAt(0).toUpperCase()}</div>
-                    <span>{u.username}</span>
-                  </td>
-                  <td className="um-cell-muted">{u.email}</td>
-                  <td>
-                    <span className={`um-role-badge ${ROLE_BADGE[u.role] || 'role-viewer'}`}>
-                      {(u.role || '').replace(/_/g, ' ')}
-                    </span>
-                  </td>
-                  <td className="um-cell-muted">{u.device_uuid || '—'}</td>
-                  <td className="um-cell-muted">{u.group_name || '—'}</td>
-                  <td>
-                    <span className={`um-status-dot ${u.is_active ? 'dot--active' : 'dot--inactive'}`}>
-                      {u.is_active ? 'Active' : 'Inactive'}
-                    </span>
-                  </td>
-                  <td>
-                    <button
-                      className={`um-toggle-btn ${u.is_active ? 'btn--deactivate' : 'btn--activate'}`}
-                      onClick={() => handleToggleActive(u)}
-                      title={u.is_active ? 'Deactivate user' : 'Activate user'}
-                    >
-                      {u.is_active ? 'Deactivate' : 'Activate'}
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              {users.map((u) => {
+                const deviceUuids = u.assigned_device_uuids?.length
+                  ? u.assigned_device_uuids
+                  : u.device_uuid
+                  ? [u.device_uuid]
+                  : [];
+                return (
+                  <tr key={u.id} className={!u.is_active ? 'um-row--inactive' : ''}>
+                    <td className="um-cell-user">
+                      <div className="um-avatar">{u.username.charAt(0).toUpperCase()}</div>
+                      <span>{u.username}</span>
+                    </td>
+                    <td className="um-cell-muted">{u.email}</td>
+                    <td>
+                      <span className={`um-role-badge ${ROLE_BADGE[u.role] || 'role-viewer'}`}>
+                        {(u.role || '').replace(/_/g, ' ')}
+                      </span>
+                    </td>
+                    <td className="um-cell-muted" title={deviceUuids.join(', ')}>
+                      {deviceUuids.length === 0
+                        ? '—'
+                        : deviceUuids.length === 1
+                        ? deviceUuids[0]
+                        : `${deviceUuids.length} devices`}
+                    </td>
+                    <td className="um-cell-muted">{u.group_name || '—'}</td>
+                    <td>
+                      <span className={`um-status-dot ${u.is_active ? 'dot--active' : 'dot--inactive'}`}>
+                        {u.is_active ? 'Active' : 'Inactive'}
+                      </span>
+                    </td>
+                    <td className="um-cell-actions">
+                      <button className="um-action-btn" onClick={() => openEdit(u)}>Edit</button>
+                      <button
+                        className={`um-toggle-btn ${u.is_active ? 'btn--deactivate' : 'btn--activate'}`}
+                        onClick={() => handleToggleActive(u)}
+                        title={u.is_active ? 'Deactivate user' : 'Activate user'}
+                      >
+                        {u.is_active ? 'Deactivate' : 'Activate'}
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
