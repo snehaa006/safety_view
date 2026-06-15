@@ -144,7 +144,9 @@ export default function UserManagement() {
       <div className="um-header">
         <div>
           <h3 className="um-title">User Management</h3>
-          <p className="um-subtitle">Manage system access, roles and device assignments</p>
+          <p className="um-subtitle">
+            Manage access and roles. A user sees every device in their assigned group.
+          </p>
         </div>
         <button
           className="um-add-btn"
@@ -204,7 +206,7 @@ export default function UserManagement() {
 
             <div className="um-form-row">
               <div className="um-field">
-                <label className="um-label">Group</label>
+                <label className="um-label">Group (grants access to all its devices)</label>
                 <select className="um-select" name="group_id" value={form.group_id} onChange={handleFormChange}>
                   <option value="">— No group —</option>
                   {groups.map((g) => (
@@ -213,7 +215,7 @@ export default function UserManagement() {
                 </select>
               </div>
               <div className="um-field">
-                <label className="um-label">Assigned Device</label>
+                <label className="um-label">Primary Device (optional)</label>
                 <select className="um-select" name="device_id" value={form.device_id} onChange={handleFormChange}>
                   <option value="">— No device —</option>
                   {devicesForGroup.map((d) => (

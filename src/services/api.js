@@ -125,10 +125,18 @@ export async function fetchDevices(user) {
     `)
     .order('id', { ascending: true });
 
-  // Non-admins only ever see their single assigned device.
+  // Access rule:
+  //   • ADMIN     → every device.
+  //   • non-admin → every device in their group (users.group_id). Falls back
+  //     to their single assigned device, or nothing, if they have no group.
   if (!isAdmin(user?.role)) {
-    if (!user?.device_id) return [];
-    query = query.eq('id', user.device_id);
+    if (user?.group_id != null) {
+      query = query.eq('group_id', user.group_id);
+    } else if (user?.device_id != null) {
+      query = query.eq('id', user.device_id);
+    } else {
+      return [];
+    }
   }
 
   const { data: devices, error } = await query;
@@ -162,17 +170,12 @@ export async function fetchDevices(user) {
   // user references it via users.device_id, otherwise NOT_ASSIGNED. This is
   // computed on read so the badge can never drift from reality.
   const assignedSet = new Set();
-  if (isAdmin(user?.role)) {
-    const { data: assignedRows } = await supabase
-      .from('users')
-      .select('device_id')
-      .in('device_id', deviceIds);
-    for (const r of assignedRows ?? []) {
-      if (r.device_id != null) assignedSet.add(r.device_id);
-    }
-  } else if (user?.device_id != null) {
-    // A non-admin only sees their own assigned device, so it is assigned.
-    assignedSet.add(user.device_id);
+  const { data: assignedRows } = await supabase
+    .from('users')
+    .select('device_id')
+    .in('device_id', deviceIds);
+  for (const r of assignedRows ?? []) {
+    if (r.device_id != null) assignedSet.add(r.device_id);
   }
 
   return devices.map((d) => ({
