@@ -383,35 +383,31 @@ export async function createUser({
   first_name,
   last_name,
   mobile_no,
+  customer_id,
+  org_name,
+  device_type,
 }) {
-  // 1. Create the account with a server-side hashed password via the RPC.
-  const { error: rpcError } = await supabase.rpc('create_user_with_password', {
+  // The create_user_with_password RPC hashes the password server-side
+  // (pgcrypto) and inserts the full v4 profile in one call. The DB trigger
+  // requires the device's group to match the user's group, so the caller
+  // passes a consistent (device_id, group_id) pair.
+  const { data, error } = await supabase.rpc('create_user_with_password', {
     p_username: username,
     p_email: email,
     p_password: password,
     p_role: role,
+    p_first_name: first_name || null,
+    p_last_name: last_name || null,
+    p_mobile_no: mobile_no || null,
+    p_customer_id: customer_id || null,
+    p_device_id: device_id || null,
+    p_group_id: group_id || null,
+    p_org_name: org_name || null,
+    p_device_type: device_type || null,
   });
-  if (rpcError) throw new Error(rpcError.message);
 
-  // 2. Attach the v4 profile fields (assigned device + group + details).
-  //    A DB trigger requires the device's group to match the user's group,
-  //    so the caller passes a consistent pair.
-  const patch = {};
-  if (device_id !== undefined) patch.device_id = device_id || null;
-  if (group_id !== undefined) patch.group_id = group_id || null;
-  if (first_name !== undefined) patch.first_name = first_name || null;
-  if (last_name !== undefined) patch.last_name = last_name || null;
-  if (mobile_no !== undefined) patch.mobile_no = mobile_no || null;
-
-  if (Object.keys(patch).length > 0) {
-    const { error: updErr } = await supabase
-      .from('users')
-      .update(patch)
-      .eq('username', username);
-    if (updErr) throw new Error(updErr.message);
-  }
-
-  return { username };
+  if (error) throw new Error(error.message);
+  return data ?? { username };
 }
 
 export async function updateUser(userId, { role, device_id, group_id }) {
