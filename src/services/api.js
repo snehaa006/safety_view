@@ -400,7 +400,7 @@ export async function fetchUsers() {
       id, username, email, role, is_active, created_at,
       first_name, last_name, mobile_no, org_name,
       device_id, group_id,
-      devices ( device_uuid ),
+      devices!device_id ( device_uuid ),
       groups ( group_name )
     `)
     .order('created_at', { ascending: false });
