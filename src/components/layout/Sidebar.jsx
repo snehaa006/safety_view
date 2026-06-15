@@ -5,7 +5,6 @@ const NAV_ITEMS = [
   { key: 'fire', label: 'Fire Safety', icon: 'flame' },
   { key: 'water', label: 'Water Systems', icon: 'droplet' },
   { key: 'events', label: 'Events Log', icon: 'bell' },
-  { key: 'users', label: 'User Management', icon: 'users', adminOnly: true },
 ];
 
 const ICONS = {
@@ -21,18 +20,9 @@ const ICONS = {
   bell: (
     <path d="M12 2a6 6 0 00-6 6v3.5c0 .9-.4 1.8-1.1 2.4L4 15h16l-.9-1.1A3.5 3.5 0 0118 11.5V8a6 6 0 00-6-6zM9.5 19a2.5 2.5 0 005 0h-5z" />
   ),
-  users: (
-    <>
-      <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" />
-      <circle cx="9" cy="7" r="4" />
-      <path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" />
-    </>
-  ),
 };
 
-export default function Sidebar({ activeView, onNavigate, userRole }) {
-  const visibleItems = NAV_ITEMS.filter((item) => !item.adminOnly || userRole === 'admin');
-
+export default function Sidebar({ activeView, onNavigate }) {
   return (
     <aside className="sidebar">
       <div className="sidebar-logo">
@@ -45,7 +35,7 @@ export default function Sidebar({ activeView, onNavigate, userRole }) {
       </div>
 
       <nav className="sidebar-nav">
-        {visibleItems.map((item) => (
+        {NAV_ITEMS.map((item) => (
           <button
             key={item.key}
             className={`sidebar-nav-item ${activeView === item.key ? 'active' : ''}`}
