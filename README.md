@@ -1,14 +1,16 @@
-# SafetyView — Fire & Water Safety Dashboard (React)
+# SafetyView — Fire & Water Safety Dashboard
 
-A modular React dashboard for monitoring fire and water safety devices.
-Stack: React + Vite frontend, Supabase (PostgreSQL via PostgREST), JWT-style
-session in `localStorage`.
+A modular dashboard for monitoring fire and water safety devices.
+
+**Stack:** React 18 + **TypeScript** + Vite, **Tailwind CSS** with
+**shadcn/ui** components, React Router (dynamic routes per page), Supabase
+(PostgreSQL via PostgREST), JWT-style session in `localStorage`.
 
 It is built against **SafetyView schema v4**:
 
 ```
 groups → devices → zones (exactly 16 per device) → zone_status
-users are assigned ONE device (users.device_id) inside a group.
+users get one or more devices via the user_devices join table (within a group).
 ```
 
 There are no `buildings` / `panels` tables — zones belong directly to a device.
@@ -45,43 +47,56 @@ Postgres RPC (pgcrypto).
   group. A device's `ASSIGNED` / `NOT_ASSIGNED` badge is derived automatically
   from whether any user is linked to it.
 
+## Routes
+
+Every page has its own URL (deep-linkable; SPA fallback in `vercel.json`):
+
+| Route | Page | Access |
+| --- | --- | --- |
+| `/login` | Sign in | public |
+| `/devices` | Device list | all |
+| `/devices/:deviceId` | Device dashboard — Overview tab | all |
+| `/devices/:deviceId/fire` `…/water` `…/events` | Device dashboard tabs | all |
+| `/device-management` | Device CRUD | admin |
+| `/users` | User list (search / filter / delete) | admin |
+| `/users/new` | Create user | admin |
+| `/users/:id` | Full user detail | admin |
+| `/users/:id/edit` | Edit user (separate page) | admin |
+
 ## Folder structure
 
 ```
 src/
   components/
-    auth/           Login page, route guard
-    layout/         Sidebar, Topbar, page shell
-    dashboard/      Summary cards, device list, device & user management,
-                    zone grid/tiles, charts, events log
-  context/          AuthContext (session state incl. device_id / group_id)
-  pages/            DashboardPage (devices → device dashboard, admin panels)
-  services/
-    supabase.js     Supabase client
-    api.js          All data access against schema v4
-  utils/            Status colors, formatting helpers
-  styles/           Global design tokens (colors, spacing, fonts)
+    ui/             shadcn/ui primitives (button, input, select, table,
+                    dialog, card, badge, checkbox, dropdown-menu, label)
+    auth/           ProtectedRoute, AdminRoute guards
+    layout/         Sidebar, Topbar, DashboardLayout (router <Outlet/>)
+    dashboard/      SummaryCards, ZoneGrid/Tile, ZoneDetailModal,
+                    ZoneCharts, EventsLog
+  context/          AuthContext (session incl. device_id / group_id)
+  pages/            LoginPage, DevicesPage, DeviceDashboardPage,
+                    DeviceManagementPage, UserManagementPage,
+                    UserFormPage, UserDetailPage
+  services/         supabase.ts (client), api.ts (typed data access)
+  types/            shared domain types (schema v4)
+  lib/utils.ts      cn() class-merge helper
+  index.css         Tailwind layers + design tokens (CSS variables)
 ```
 
-## Data access (`src/services/api.js`)
+## Data access (`src/services/api.ts`)
 
-Key functions, all scoped to the v4 schema:
+Fully typed against schema v4. Key functions:
 
-- `login(username, password)` — `check_password` RPC + profile lookup.
+- `login` / `logout` / `decodeToken` — `check_password` RPC + profile lookup.
 - `fetchDevices(user)` — devices visible to the user (admin = all, else their
-  assigned device), each with a live fire/fault zone summary.
-- `fetchZonesByDevice(id)` — a device's 16 zones + `zone_status` + the latest
-  `sensor_readings` row per zone.
-- `fetchEventsByDevice(id)` / `acknowledgeEvent(id)`.
-- `fetchGroups()`, `createDevice` / `updateDevice` / `deleteDevice`.
-- `fetchUsers`, `createUser` (RPC `create_user_with_password` + profile patch),
-  `updateUser`, `toggleUserActive`.
-
-No component code needs to change to point at a different backend as long as
-these functions return the same shapes.
+  assigned devices), each with a live fire/fault zone summary + derived status.
+- `fetchDeviceById` / `fetchZonesByDevice` / `fetchEventsByDevice` / `acknowledgeEvent`.
+- `fetchGroups`, `createDevice` / `updateDevice` / `deleteDevice`.
+- `fetchUsers` / `fetchUserById`, `createUser` (RPC `create_user_with_password`),
+  `updateUser`, `setUserDevices` (many-to-many), `toggleUserActive`, `deleteUser`.
 
 ## Theme
 
-White background with light accent boxes for status (water = light blue,
-fire = light orange/red, fault = light amber, normal = light green). All tokens
-live in `src/styles/global.css`.
+Tailwind theme in `tailwind.config.js`; shadcn CSS variables + domain status
+palette (water / fire / ok / warn / crit / off) in `src/index.css`.
