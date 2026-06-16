@@ -66,15 +66,15 @@ export async function login(username: string, password: string): Promise<LoginRe
   const { data: profileRow } = await supabase
     .from('users')
     .select('id, username, email, role, device_id, group_id, first_name, last_name')
-    .eq('id', account.id)
+    .eq('id', account.out_id)
     .single();
   if (profileRow) profile = profileRow;
 
   const user: AuthUser = {
-    id: account.id,
-    username: account.username,
-    role: (account.role ?? profile.role) as string,
-    email: (account.email ?? profile.email) as string | null,
+    id: account.out_id,
+    username: account.out_username,
+    role: (account.out_role ?? profile.role) as string,
+    email: (account.out_email ?? profile.email) as string | null,
     device_id: (profile.device_id as number | null) ?? null,
     group_id: (profile.group_id as number | null) ?? null,
     first_name: (profile.first_name as string | null) ?? null,
@@ -89,8 +89,8 @@ export async function login(username: string, password: string): Promise<LoginRe
     group_id: user.group_id ?? null,
     exp: Date.now() + 8 * 60 * 60 * 1000,
   };
-  const token = `supabase.${btoa(JSON.stringify(payload))}.sig`;
 
+  const token = `supabase.${btoa(JSON.stringify(payload))}.sig`;
   localStorage.setItem(AUTH_TOKEN_KEY, token);
   return { token, user };
 }
