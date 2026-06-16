@@ -67,7 +67,7 @@ export async function login(username: string, password: string): Promise<LoginRe
     .from('users')
     .select('id, username, email, role, device_id, group_id, first_name, last_name')
     .eq('id', account.out_id)
-    .single();
+    .maybeSingle();
   if (profileRow) profile = profileRow;
 
   const user: AuthUser = {
@@ -217,7 +217,7 @@ export async function createDevice(input: {
       group_id: input.group_id || null,
     })
     .select('id, device_uuid')
-    .single();
+    .maybeSingle();
 
   if (error) throw new Error(error.message);
   return data as { id: number; device_uuid: string };
@@ -236,7 +236,7 @@ export async function updateDevice(
     .update(patch)
     .eq('id', id)
     .select('id')
-    .single();
+    .maybeSingle();
 
   if (error) throw new Error(error.message);
   return data as { id: number };
@@ -262,7 +262,7 @@ export async function fetchDeviceById(id: number): Promise<DeviceInfo | null> {
     .from('devices')
     .select('id, device_uuid, device_remarks, status, group_id, groups ( group_name )')
     .eq('id', id)
-    .single();
+    .maybeSingle();
   if (error || !data) return null;
   const d = data as any;
   return {
@@ -395,7 +395,7 @@ export async function acknowledgeEvent(eventId: number): Promise<{ id: number; i
     .update({ is_acknowledged: true, acknowledged_at: new Date().toISOString() })
     .eq('id', eventId)
     .select('id, is_acknowledged')
-    .single();
+    .maybeSingle();
 
   if (error) throw new Error(error.message);
   return data as { id: number; is_acknowledged: boolean };
@@ -473,7 +473,11 @@ export async function fetchUsers(): Promise<ManagedUser[]> {
 }
 
 export async function fetchUserById(userId: number): Promise<ManagedUser | null> {
-  const { data, error } = await supabase.from('users').select(USER_SELECT).eq('id', userId).single();
+  const { data, error } = await supabase
+    .from('users')
+    .select(USER_SELECT)
+    .eq('id', userId)
+    .maybeSingle();
   if (error || !data) return null;
 
   const { data: udRows } = await supabase
@@ -509,7 +513,7 @@ export async function createUser(input: CreateUserInput): Promise<{ id: number |
     .from('users')
     .select('id')
     .eq('username', input.username)
-    .single();
+    .maybeSingle();
   return { id: (row as any)?.id, username: input.username };
 }
 
@@ -528,7 +532,7 @@ export async function updateUser(userId: number, fields: UpdateUserInput): Promi
     .update(patch)
     .eq('id', userId)
     .select('id')
-    .single();
+    .maybeSingle();
 
   if (error) throw new Error(error.message);
   return data as { id: number };
@@ -556,7 +560,7 @@ export async function toggleUserActive(
     .update({ is_active: isActive })
     .eq('id', userId)
     .select('id, is_active')
-    .single();
+    .maybeSingle();
 
   if (error) throw new Error(error.message);
   return data as { id: number; is_active: boolean };
