@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Server } from 'lucide-react';
 import { fetchDevices } from '@/services/api';
 import { useAuth } from '@/context/AuthContext';
+import { isAdminUser } from '@/lib/roles';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
@@ -11,7 +12,7 @@ import type { Device } from '@/types';
 export default function DevicesPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const isAdmin = user?.role?.toUpperCase() === 'ADMIN';
+  const isAdmin = isAdminUser(user);
 
   const [devices, setDevices] = useState<Device[]>([]);
   const [loading, setLoading] = useState(true);

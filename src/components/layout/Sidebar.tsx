@@ -1,6 +1,7 @@
 import { NavLink } from 'react-router-dom';
 import { Building2, Cog, Droplet, FolderTree, LayoutGrid, Server, Settings, Users } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
+import { isAdminUser } from '@/lib/roles';
 import { cn } from '@/lib/utils';
 
 interface NavItem {
@@ -21,7 +22,7 @@ const NAV_ITEMS: NavItem[] = [
 
 export default function Sidebar() {
   const { user } = useAuth();
-  const isAdmin = user?.role?.toUpperCase() === 'ADMIN';
+  const isAdmin = isAdminUser(user);
   const items = NAV_ITEMS.filter((i) => !i.adminOnly || isAdmin);
 
   return (
