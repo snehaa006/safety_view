@@ -63,25 +63,32 @@ export async function login(username: string, password: string): Promise<LoginRe
   if (error) throw new Error(error.message);
   if (!data || data.length === 0) throw new Error('Invalid username or password');
 
-  const account = data[0];
+  // The check_password RPC may return columns either plain (id, username…)
+  // or OUT-prefixed (out_id, out_username…). Support both.
+  const account = data[0] as Record<string, any>;
+  const accId = account.out_id ?? account.id;
+  const accUsername = account.out_username ?? account.username;
+  const accRole = account.out_role ?? account.role;
+  const accEmail = account.out_email ?? account.email;
+  const accHier = account.out_hierarchy_level ?? account.hierarchy_level;
 
   let profile: Record<string, unknown> = {};
   const { data: profileRow } = await supabase
     .from('users')
     .select('id, username, email, role, device_id, group_id, organization_id, hierarchy_level, first_name, last_name')
-    .eq('id', account.id)
+    .eq('id', accId)
     .single();
   if (profileRow) profile = profileRow;
 
   const user: AuthUser = {
-    id: account.out_id,
-    username: account.out_username,
-    role: (account.out_role ?? profile.role) as string,
-    email: (account.out_email ?? profile.email) as string | null,
+    id: accId,
+    username: accUsername,
+    role: (accRole ?? profile.role) as string,
+    email: (accEmail ?? profile.email) as string | null,
     device_id: (profile.device_id as number | null) ?? null,
     group_id: (profile.group_id as number | null) ?? null,
     organization_id: (profile.organization_id as number | null) ?? null,
-    hierarchy_level: (account.hierarchy_level ?? profile.hierarchy_level ?? null) as number | null,
+    hierarchy_level: (accHier ?? profile.hierarchy_level ?? null) as number | null,
     first_name: (profile.first_name as string | null) ?? null,
     last_name: (profile.last_name as string | null) ?? null,
   };
