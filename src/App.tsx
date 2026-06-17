@@ -5,6 +5,9 @@ import AdminRoute from '@/components/auth/AdminRoute';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import LoginPage from '@/pages/LoginPage';
 import DevicesPage from '@/pages/DevicesPage';
+import BuildingsPage from '@/pages/BuildingsPage';
+import BuildingDevicesPage from '@/pages/BuildingDevicesPage';
+import BuildingManagementPage from '@/pages/BuildingManagementPage';
 import DeviceManagementPage from '@/pages/DeviceManagementPage';
 import UserManagementPage from '@/pages/UserManagementPage';
 import UserFormPage from '@/pages/UserFormPage';
@@ -31,6 +34,8 @@ export default function App() {
           <Route element={<ProtectedRoute />}>
             <Route element={<DashboardLayout />}>
               <Route path="/devices" element={<DevicesPage />} />
+              <Route path="/buildings" element={<BuildingsPage />} />
+              <Route path="/buildings/:buildingId" element={<BuildingDevicesPage />} />
 
               <Route path="/devices/:deviceId" element={<DeviceDashboardPage />}>
                 <Route index element={<DeviceOverview />} />
@@ -43,6 +48,7 @@ export default function App() {
 
               {/* Admin-only routes */}
               <Route element={<AdminRoute />}>
+                <Route path="/building-management" element={<BuildingManagementPage />} />
                 <Route path="/device-management" element={<DeviceManagementPage />} />
                 <Route path="/organizations" element={<OrganizationsPage />} />
                 <Route path="/groups" element={<GroupsPage />} />

@@ -5,6 +5,7 @@ import {
   fetchGroups,
   fetchDevices,
   fetchOrganizations,
+  fetchBuildings,
   fetchUserById,
   createUser,
   updateUser,
@@ -26,7 +27,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { ROLE_OPTIONS, type Device, type Group, type Organization, type TodoItem } from '@/types';
+import { ROLE_OPTIONS, type Building, type Device, type Group, type Organization, type TodoItem } from '@/types';
 
 interface FormState {
   username: string;
@@ -39,6 +40,7 @@ interface FormState {
   role: string;
   group_id: string;
   organization_id: string;
+  building_id: string;
   device_type: string;
   customer_id: string;
   alert_email_enabled: boolean;
@@ -60,6 +62,7 @@ const EMPTY: FormState = {
   role: 'VIEWER',
   group_id: '',
   organization_id: '',
+  building_id: '',
   device_type: '',
   customer_id: '',
   alert_email_enabled: false,
@@ -77,6 +80,7 @@ export default function UserFormPage() {
   const [groups, setGroups] = useState<Group[]>([]);
   const [orgs, setOrgs] = useState<Organization[]>([]);
   const [devices, setDevices] = useState<Device[]>([]);
+  const [buildings, setBuildings] = useState<Building[]>([]);
   const [form, setForm] = useState<FormState>(EMPTY);
   const initialRef = useRef<string>(JSON.stringify(EMPTY));
   const [loading, setLoading] = useState(true);
@@ -87,14 +91,16 @@ export default function UserFormPage() {
   useEffect(() => {
     (async () => {
       try {
-        const [g, o, d] = await Promise.all([
+        const [g, o, d, b] = await Promise.all([
           fetchGroups(),
           fetchOrganizations().catch(() => []),
           fetchDevices(currentUser),
+          fetchBuildings(currentUser).catch(() => []),
         ]);
         setGroups(g);
         setOrgs(o);
         setDevices(d);
+        setBuildings(b);
 
         let next: FormState;
         if (isEditing) {
@@ -111,6 +117,7 @@ export default function UserFormPage() {
                 role: u.role,
                 group_id: u.group_id ? String(u.group_id) : '',
                 organization_id: u.organization_id ? String(u.organization_id) : '',
+                building_id: u.building_id ? String(u.building_id) : '',
                 device_type: u.device_type || '',
                 customer_id: u.customer_id || '',
                 alert_email_enabled: !!u.alert_email_enabled,
@@ -207,6 +214,7 @@ export default function UserFormPage() {
     const primaryDevice = form.deviceIds[0] ?? null;
     const groupId = form.group_id ? Number(form.group_id) : null;
     const orgId = form.organization_id ? Number(form.organization_id) : null;
+    const buildingId = form.building_id ? Number(form.building_id) : null;
     const remarks = serializeTodos(form.todos);
 
     try {
@@ -223,6 +231,7 @@ export default function UserFormPage() {
           group_id: groupId,
           device_id: primaryDevice,
           organization_id: orgId,
+          building_id: buildingId,
           device_type: form.device_type.trim(),
           alert_email_enabled: form.alert_email_enabled,
           remarks,
@@ -239,6 +248,7 @@ export default function UserFormPage() {
           group_id: groupId,
           device_id: primaryDevice,
           organization_id: orgId,
+          building_id: buildingId,
           customer_id: form.customer_id || null,
           device_type: form.device_type.trim() || null,
           alert_email_enabled: form.alert_email_enabled,
@@ -320,6 +330,17 @@ export default function UserFormPage() {
                 <SelectItem value="none">— No group —</SelectItem>
                 {groups.map((g) => (
                   <SelectItem key={g.id} value={String(g.id)}>{g.group_name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field label="Building (for building operators)">
+            <Select value={form.building_id || 'none'} onValueChange={(v) => update('building_id', v === 'none' ? '' : v)}>
+              <SelectTrigger><SelectValue placeholder="No building" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">— No building —</SelectItem>
+                {buildings.map((b) => (
+                  <SelectItem key={b.id} value={String(b.id)}>{b.building_name}</SelectItem>
                 ))}
               </SelectContent>
             </Select>

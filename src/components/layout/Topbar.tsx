@@ -4,6 +4,9 @@ import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/button';
 
 function titleForPath(pathname: string): string {
+  if (matchPath('/buildings', pathname)) return 'Buildings';
+  if (matchPath('/buildings/*', pathname)) return 'Building';
+  if (matchPath('/building-management', pathname)) return 'Building Management';
   if (matchPath('/devices', pathname)) return 'Devices';
   if (matchPath('/devices/*', pathname)) return 'Device Dashboard';
   if (matchPath('/device-management', pathname)) return 'Device Management';
