@@ -14,12 +14,14 @@
 
 import { supabase } from './supabase';
 import type {
+  AuditLogEntry,
   AuthUser,
   CreateUserInput,
   Device,
   DeviceHealth,
   DeviceStatus,
   Group,
+  Location,
   LoginResult,
   ManagedUser,
   Organization,
@@ -682,11 +684,17 @@ export async function createUser(input: CreateUserInput): Promise<{ id: number |
     .single();
   const newId = (row as any)?.id as number | undefined;
 
-  // The RPC doesn't accept organization_id / remarks — patch them after.
-  if (newId != null && (input.organization_id !== undefined || input.remarks !== undefined)) {
+  // The RPC doesn't accept organization_id / remarks / alert flag — patch after.
+  if (
+    newId != null &&
+    (input.organization_id !== undefined ||
+      input.remarks !== undefined ||
+      input.alert_email_enabled !== undefined)
+  ) {
     const patch: Record<string, unknown> = {};
     if (input.organization_id !== undefined) patch.organization_id = input.organization_id || null;
     if (input.remarks !== undefined) patch.remarks = input.remarks || null;
+    if (input.alert_email_enabled !== undefined) patch.alert_email_enabled = input.alert_email_enabled;
     await supabase.from('users').update(patch).eq('id', newId);
   }
 
@@ -704,6 +712,8 @@ export async function updateUser(userId: number, fields: UpdateUserInput): Promi
   if (fields.mobile_no !== undefined) patch.mobile_no = fields.mobile_no || null;
   if (fields.organization_id !== undefined) patch.organization_id = fields.organization_id || null;
   if (fields.remarks !== undefined) patch.remarks = fields.remarks || null;
+  if (fields.device_type !== undefined) patch.device_type = fields.device_type || null;
+  if (fields.alert_email_enabled !== undefined) patch.alert_email_enabled = fields.alert_email_enabled;
 
   const { data, error } = await supabase
     .from('users')
@@ -742,6 +752,83 @@ export async function toggleUserActive(
 
   if (error) throw new Error(error.message);
   return data as { id: number; is_active: boolean };
+}
+
+// Replace the full alert-email list for a user (user_alert_emails table).
+export async function setUserAlertEmails(userId: number, emails: string[]): Promise<void> {
+  const { error: delErr } = await supabase.from('user_alert_emails').delete().eq('user_id', userId);
+  if (delErr) throw new Error(delErr.message);
+  const clean = (emails ?? []).map((e) => e.trim()).filter((e) => e.length > 0);
+  if (clean.length === 0) return;
+  // de-duplicate (table has UNIQUE(user_id, email))
+  const rows = Array.from(new Set(clean)).map((email) => ({ user_id: userId, email }));
+  const { error: insErr } = await supabase.from('user_alert_emails').insert(rows);
+  if (insErr) throw new Error(insErr.message);
+}
+
+// ---------------------------------------------------------------------------
+// Locations (admin CRUD)
+// ---------------------------------------------------------------------------
+
+export async function fetchLocations(): Promise<Location[]> {
+  const { data, error } = await supabase
+    .from('locations')
+    .select('id, name, type, parent_id, created_at')
+    .order('id', { ascending: true });
+  if (error) throw new Error(error.message);
+  return (data ?? []) as Location[];
+}
+
+export async function createLocation(input: {
+  name: string;
+  type: string;
+  parent_id?: number | null;
+}): Promise<{ id: number }> {
+  const { data, error } = await supabase
+    .from('locations')
+    .insert({ name: input.name, type: input.type, parent_id: input.parent_id || null })
+    .select('id')
+    .single();
+  if (error) throw new Error(error.message);
+  return data as { id: number };
+}
+
+export async function updateLocation(
+  id: number,
+  fields: { name?: string; type?: string; parent_id?: number | null }
+): Promise<{ id: number }> {
+  const patch: Record<string, unknown> = {};
+  if (fields.name !== undefined) patch.name = fields.name;
+  if (fields.type !== undefined) patch.type = fields.type;
+  if (fields.parent_id !== undefined) patch.parent_id = fields.parent_id || null;
+  const { data, error } = await supabase
+    .from('locations')
+    .update(patch)
+    .eq('id', id)
+    .select('id')
+    .single();
+  if (error) throw new Error(error.message);
+  return data as { id: number };
+}
+
+export async function deleteLocation(id: number): Promise<{ id: number }> {
+  const { error } = await supabase.from('locations').delete().eq('id', id);
+  if (error) throw new Error(error.message);
+  return { id };
+}
+
+// ---------------------------------------------------------------------------
+// Audit Log (read-only; requires a SELECT policy for the anon key)
+// ---------------------------------------------------------------------------
+
+export async function fetchAuditLog(limit = 200): Promise<AuditLogEntry[]> {
+  const { data, error } = await supabase
+    .from('audit_log')
+    .select('id, performed_by, user_role, action, target_table, target_id, description, created_at')
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (error) throw new Error(error.message);
+  return (data ?? []) as AuditLogEntry[];
 }
 
 export async function deleteUser(userId: number): Promise<{ id: number }> {

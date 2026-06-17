@@ -11,6 +11,8 @@ import UserFormPage from '@/pages/UserFormPage';
 import UserDetailPage from '@/pages/UserDetailPage';
 import OrganizationsPage from '@/pages/OrganizationsPage';
 import GroupsPage from '@/pages/GroupsPage';
+import LocationsPage from '@/pages/LocationsPage';
+import AuditLogPage from '@/pages/AuditLogPage';
 import SettingsPage from '@/pages/SettingsPage';
 import DeviceDashboardPage, {
   DeviceOverview,
@@ -44,6 +46,8 @@ export default function App() {
                 <Route path="/device-management" element={<DeviceManagementPage />} />
                 <Route path="/organizations" element={<OrganizationsPage />} />
                 <Route path="/groups" element={<GroupsPage />} />
+                <Route path="/locations" element={<LocationsPage />} />
+                <Route path="/audit-log" element={<AuditLogPage />} />
                 <Route path="/users" element={<UserManagementPage />} />
                 <Route path="/users/new" element={<UserFormPage />} />
                 <Route path="/users/:id" element={<UserDetailPage />} />

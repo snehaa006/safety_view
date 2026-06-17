@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ChevronLeft } from 'lucide-react';
+import { ChevronLeft, Plus, Trash2 } from 'lucide-react';
 import {
   fetchGroups,
   fetchDevices,
@@ -9,8 +9,10 @@ import {
   createUser,
   updateUser,
   setUserDevices,
+  setUserAlertEmails,
 } from '@/services/api';
 import { useAuth } from '@/context/AuthContext';
+import { parseTodos, serializeTodos } from '@/lib/todos';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -24,7 +26,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { ROLE_OPTIONS, type Device, type Group, type Organization } from '@/types';
+import { ROLE_OPTIONS, type Device, type Group, type Organization, type TodoItem } from '@/types';
 
 interface FormState {
   username: string;
@@ -37,8 +39,11 @@ interface FormState {
   role: string;
   group_id: string;
   organization_id: string;
-  remarks: string;
+  device_type: string;
   customer_id: string;
+  alert_email_enabled: boolean;
+  alertEmails: string[];
+  todos: TodoItem[];
   deviceIds: number[];
 }
 
@@ -55,8 +60,11 @@ const EMPTY: FormState = {
   role: 'VIEWER',
   group_id: '',
   organization_id: '',
-  remarks: '',
+  device_type: '',
   customer_id: '',
+  alert_email_enabled: false,
+  alertEmails: [],
+  todos: [],
   deviceIds: [],
 };
 
@@ -79,7 +87,11 @@ export default function UserFormPage() {
   useEffect(() => {
     (async () => {
       try {
-        const [g, o, d] = await Promise.all([fetchGroups(), fetchOrganizations().catch(() => []), fetchDevices(currentUser)]);
+        const [g, o, d] = await Promise.all([
+          fetchGroups(),
+          fetchOrganizations().catch(() => []),
+          fetchDevices(currentUser),
+        ]);
         setGroups(g);
         setOrgs(o);
         setDevices(d);
@@ -99,13 +111,15 @@ export default function UserFormPage() {
                 role: u.role,
                 group_id: u.group_id ? String(u.group_id) : '',
                 organization_id: u.organization_id ? String(u.organization_id) : '',
-                remarks: u.remarks || '',
+                device_type: u.device_type || '',
                 customer_id: u.customer_id || '',
+                alert_email_enabled: !!u.alert_email_enabled,
+                alertEmails: u.alert_emails ?? [],
+                todos: parseTodos(u.remarks),
                 deviceIds: u.assigned_device_ids.length ? u.assigned_device_ids : u.device_id ? [u.device_id] : [],
               }
             : EMPTY;
         } else {
-          // Auto-generate a UUID "user id" for new accounts (stored in customer_id).
           next = { ...EMPTY, customer_id: crypto.randomUUID() };
         }
         setForm(next);
@@ -128,7 +142,6 @@ export default function UserFormPage() {
 
   function update<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
-    // Clear that field's error as the user corrects it.
     setErrors((prev) => (prev[key] ? { ...prev, [key]: undefined } : prev));
     setSubmitError('');
   }
@@ -147,6 +160,31 @@ export default function UserFormPage() {
         ? prev.deviceIds.filter((x) => x !== deviceId)
         : [...prev.deviceIds, deviceId],
     }));
+  }
+
+  // Alert email list helpers
+  function addEmail() {
+    update('alertEmails', [...form.alertEmails, '']);
+  }
+  function setEmail(i: number, value: string) {
+    update('alertEmails', form.alertEmails.map((e, idx) => (idx === i ? value : e)));
+  }
+  function removeEmail(i: number) {
+    update('alertEmails', form.alertEmails.filter((_, idx) => idx !== i));
+  }
+
+  // To-do notes helpers
+  function addTodo() {
+    update('todos', [...form.todos, { text: '', done: false }]);
+  }
+  function setTodoText(i: number, text: string) {
+    update('todos', form.todos.map((t, idx) => (idx === i ? { ...t, text } : t)));
+  }
+  function toggleTodo(i: number) {
+    update('todos', form.todos.map((t, idx) => (idx === i ? { ...t, done: !t.done } : t)));
+  }
+  function removeTodo(i: number) {
+    update('todos', form.todos.filter((_, idx) => idx !== i));
   }
 
   function validate(): boolean {
@@ -169,6 +207,7 @@ export default function UserFormPage() {
     const primaryDevice = form.deviceIds[0] ?? null;
     const groupId = form.group_id ? Number(form.group_id) : null;
     const orgId = form.organization_id ? Number(form.organization_id) : null;
+    const remarks = serializeTodos(form.todos);
 
     try {
       setSubmitting(true);
@@ -184,7 +223,9 @@ export default function UserFormPage() {
           group_id: groupId,
           device_id: primaryDevice,
           organization_id: orgId,
-          remarks: form.remarks.trim(),
+          device_type: form.device_type.trim(),
+          alert_email_enabled: form.alert_email_enabled,
+          remarks,
         });
       } else {
         const created = await createUser({
@@ -199,12 +240,17 @@ export default function UserFormPage() {
           device_id: primaryDevice,
           organization_id: orgId,
           customer_id: form.customer_id || null,
-          remarks: form.remarks.trim() || null,
+          device_type: form.device_type.trim() || null,
+          alert_email_enabled: form.alert_email_enabled,
+          remarks: remarks || null,
         });
         userId = created.id;
       }
 
-      if (userId != null) await setUserDevices(userId, form.deviceIds);
+      if (userId != null) {
+        await setUserDevices(userId, form.deviceIds);
+        await setUserAlertEmails(userId, form.alertEmails);
+      }
       navigate('/users');
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : 'Failed to save user.');
@@ -229,22 +275,10 @@ export default function UserFormPage() {
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field label="Username" error={errors.username}>
-            <Input
-              value={form.username}
-              onChange={(e) => update('username', e.target.value)}
-              placeholder="e.g. rajesh.sharma"
-              disabled={isEditing}
-              aria-invalid={!!errors.username}
-            />
+            <Input value={form.username} onChange={(e) => update('username', e.target.value)} placeholder="e.g. rajesh.sharma" disabled={isEditing} aria-invalid={!!errors.username} />
           </Field>
           <Field label="Email" error={errors.email}>
-            <Input
-              type="email"
-              value={form.email}
-              onChange={(e) => update('email', e.target.value)}
-              placeholder="user@company.com"
-              aria-invalid={!!errors.email}
-            />
+            <Input type="email" value={form.email} onChange={(e) => update('email', e.target.value)} placeholder="user@company.com" aria-invalid={!!errors.email} />
           </Field>
           <Field label="First Name">
             <Input value={form.first_name} onChange={(e) => update('first_name', e.target.value)} />
@@ -254,6 +288,9 @@ export default function UserFormPage() {
           </Field>
           <Field label="Mobile No.">
             <Input value={form.mobile_no} onChange={(e) => update('mobile_no', e.target.value)} />
+          </Field>
+          <Field label="Device Type">
+            <Input value={form.device_type} onChange={(e) => update('device_type', e.target.value)} placeholder="e.g. SIA Device" />
           </Field>
           <Field label="Role">
             <Select value={form.role} onValueChange={(v) => update('role', v)}>
@@ -287,67 +324,104 @@ export default function UserFormPage() {
               </SelectContent>
             </Select>
           </Field>
-
           <Field label="User ID (auto)">
             <Input value={form.customer_id} readOnly className="font-mono text-xs" />
           </Field>
+        </div>
 
-          <div className="sm:col-span-2">
-            <Label>Assigned Devices</Label>
-            {!form.group_id ? (
-              <div className="mt-1.5 text-sm text-muted-foreground">Select a group first to choose devices.</div>
-            ) : devicesForGroup.length === 0 ? (
-              <div className="mt-1.5 text-sm text-muted-foreground">No devices in this group yet.</div>
-            ) : (
-              <div className="mt-1.5 flex max-h-44 flex-col gap-2 overflow-y-auto rounded-md border border-border bg-background p-3">
-                {devicesForGroup.map((d) => (
-                  <label key={d.id} className="flex cursor-pointer items-center gap-2 text-sm">
-                    <Checkbox checked={form.deviceIds.includes(d.id)} onCheckedChange={() => toggleDevice(d.id)} />
-                    <span className="flex flex-col leading-tight">
-                      {d.device_remarks || d.device_uuid}
-                      <span className="font-mono text-xs text-muted-foreground">{d.device_uuid}</span>
-                    </span>
-                  </label>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div className="sm:col-span-2">
-            <Label>Notes (private)</Label>
-            <textarea
-              className="mt-1.5 flex min-h-[72px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              value={form.remarks}
-              onChange={(e) => update('remarks', e.target.value)}
-              placeholder="Internal notes — only visible to admins / authorised accounts"
-            />
-          </div>
-
-          {!isEditing && (
-            <>
-              <Field label="Password" error={errors.password}>
-                <PasswordInput
-                  value={form.password}
-                  onChange={(e) => update('password', e.target.value)}
-                  placeholder="Min. 8 characters"
-                  aria-invalid={!!errors.password}
-                />
-              </Field>
-              <Field label="Confirm Password" error={errors.confirmPassword}>
-                <PasswordInput
-                  value={form.confirmPassword}
-                  onChange={(e) => update('confirmPassword', e.target.value)}
-                  aria-invalid={!!errors.confirmPassword}
-                />
-              </Field>
-            </>
+        {/* Assigned devices */}
+        <div className="mt-4">
+          <Label>Assigned Devices</Label>
+          {!form.group_id ? (
+            <div className="mt-1.5 text-sm text-muted-foreground">Select a group first to choose devices.</div>
+          ) : devicesForGroup.length === 0 ? (
+            <div className="mt-1.5 text-sm text-muted-foreground">No devices in this group yet.</div>
+          ) : (
+            <div className="mt-1.5 flex max-h-44 flex-col gap-2 overflow-y-auto rounded-md border border-border bg-background p-3">
+              {devicesForGroup.map((d) => (
+                <label key={d.id} className="flex cursor-pointer items-center gap-2 text-sm">
+                  <Checkbox checked={form.deviceIds.includes(d.id)} onCheckedChange={() => toggleDevice(d.id)} />
+                  <span className="flex flex-col leading-tight">
+                    {d.device_remarks || d.device_uuid}
+                    <span className="font-mono text-xs text-muted-foreground">{d.device_uuid}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
           )}
         </div>
 
-        {submitError && (
-          <div className="mt-4 rounded-md border border-crit-border bg-crit-bg px-3 py-2 text-sm text-crit-text">
-            {submitError}
+        {/* Alert emails */}
+        <div className="mt-4 rounded-md border border-border p-4">
+          <label className="flex cursor-pointer items-center gap-2 text-sm font-medium">
+            <Checkbox checked={form.alert_email_enabled} onCheckedChange={(v) => update('alert_email_enabled', v === true)} />
+            Alert emails enabled
+          </label>
+          <div className="mt-3 flex items-center justify-between">
+            <Label>Alert Email List</Label>
+            <Button type="button" variant="outline" size="sm" onClick={addEmail}>
+              <Plus className="h-4 w-4" /> Add email
+            </Button>
           </div>
+          {form.alertEmails.length === 0 ? (
+            <p className="mt-2 text-sm text-muted-foreground">No alert emails added.</p>
+          ) : (
+            <div className="mt-2 flex flex-col gap-2">
+              {form.alertEmails.map((email, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <Input type="email" value={email} onChange={(e) => setEmail(i, e.target.value)} placeholder="alerts@company.com" />
+                  <Button type="button" variant="ghost" size="icon" onClick={() => removeEmail(i)}>
+                    <Trash2 className="h-4 w-4 text-crit-text" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Notes as a to-do checklist */}
+        <div className="mt-4 rounded-md border border-border p-4">
+          <div className="flex items-center justify-between">
+            <Label>Notes / To-do (private)</Label>
+            <Button type="button" variant="outline" size="sm" onClick={addTodo}>
+              <Plus className="h-4 w-4" /> Add item
+            </Button>
+          </div>
+          {form.todos.length === 0 ? (
+            <p className="mt-2 text-sm text-muted-foreground">No notes yet. Add a to-do item for this user.</p>
+          ) : (
+            <div className="mt-2 flex flex-col gap-2">
+              {form.todos.map((t, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <Checkbox checked={t.done} onCheckedChange={() => toggleTodo(i)} />
+                  <Input
+                    value={t.text}
+                    onChange={(e) => setTodoText(i, e.target.value)}
+                    placeholder="e.g. Verify phone number"
+                    className={t.done ? 'line-through text-muted-foreground' : ''}
+                  />
+                  <Button type="button" variant="ghost" size="icon" onClick={() => removeTodo(i)}>
+                    <Trash2 className="h-4 w-4 text-crit-text" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {!isEditing && (
+          <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Field label="Password" error={errors.password}>
+              <PasswordInput value={form.password} onChange={(e) => update('password', e.target.value)} placeholder="Min. 8 characters" aria-invalid={!!errors.password} />
+            </Field>
+            <Field label="Confirm Password" error={errors.confirmPassword}>
+              <PasswordInput value={form.confirmPassword} onChange={(e) => update('confirmPassword', e.target.value)} aria-invalid={!!errors.confirmPassword} />
+            </Field>
+          </div>
+        )}
+
+        {submitError && (
+          <div className="mt-4 rounded-md border border-crit-border bg-crit-bg px-3 py-2 text-sm text-crit-text">{submitError}</div>
         )}
 
         <div className="mt-6 flex items-center justify-end gap-3">

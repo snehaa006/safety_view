@@ -180,6 +180,7 @@ export interface CreateUserInput {
   org_name?: string | null;
   organization_id?: number | null;
   device_type?: string | null;
+  alert_email_enabled?: boolean;
   remarks?: string | null;
 }
 
@@ -192,5 +193,32 @@ export interface UpdateUserInput {
   last_name?: string;
   mobile_no?: string;
   organization_id?: number | null;
+  device_type?: string | null;
+  alert_email_enabled?: boolean;
   remarks?: string | null;
+}
+
+export interface Location {
+  id: number;
+  name: string;
+  type: 'NATIONAL' | 'REGIONAL' | 'DISTRICT';
+  parent_id: number | null;
+  created_at: string | null;
+}
+
+export interface AuditLogEntry {
+  id: number;
+  performed_by: number | null;
+  user_role: string | null;
+  action: string;
+  target_table: string | null;
+  target_id: number | null;
+  description: string | null;
+  created_at: string;
+}
+
+/** A single notes/to-do item stored (as JSON) in users.remarks. */
+export interface TodoItem {
+  text: string;
+  done: boolean;
 }
