@@ -555,17 +555,21 @@ export function summariseZones(zones: Zone[]): ZoneSummary {
 // ---------------------------------------------------------------------------
 
 const USER_SELECT = `
-  id, username, email, role, is_active, created_at, last_login,
+  id, username, email, role, is_active, created_at, updated_at, last_login,
   first_name, last_name, mobile_no, customer_id, org_name,
   organization_id, hierarchy_level, parent_user_id, device_type,
   remarks, alert_email_enabled,
   device_id, group_id,
   devices!device_id ( device_uuid ),
   groups ( group_name ),
-  organizations ( organization_name )
+  organizations ( organization_name, logo_path )
 `;
 
-function normaliseUser(u: any, assigned: { id: number; uuid: string | null }[]): ManagedUser {
+function normaliseUser(
+  u: any,
+  assigned: { id: number; uuid: string | null }[],
+  alertEmails: string[] = []
+): ManagedUser {
   return {
     id: u.id,
     username: u.username,
@@ -573,6 +577,7 @@ function normaliseUser(u: any, assigned: { id: number; uuid: string | null }[]):
     role: u.role,
     is_active: u.is_active,
     created_at: u.created_at,
+    updated_at: u.updated_at ?? null,
     last_login: u.last_login ?? null,
     first_name: u.first_name ?? null,
     last_name: u.last_name ?? null,
@@ -581,11 +586,13 @@ function normaliseUser(u: any, assigned: { id: number; uuid: string | null }[]):
     org_name: u.org_name ?? null,
     organization_id: u.organization_id ?? null,
     organization_name: u.organizations?.organization_name ?? null,
+    organization_logo: u.organizations?.logo_path ?? null,
     hierarchy_level: u.hierarchy_level ?? null,
     parent_user_id: u.parent_user_id ?? null,
     device_type: u.device_type ?? null,
     remarks: u.remarks ?? null,
     alert_email_enabled: u.alert_email_enabled ?? null,
+    alert_emails: alertEmails,
     device_id: u.device_id ?? null,
     group_id: u.group_id ?? null,
     device_uuid: u.devices?.device_uuid ?? null,
@@ -593,6 +600,15 @@ function normaliseUser(u: any, assigned: { id: number; uuid: string | null }[]):
     assigned_device_ids: assigned.map((d) => d.id),
     assigned_device_uuids: assigned.map((d) => d.uuid).filter((x): x is string => !!x),
   };
+}
+
+async function alertEmailsByUser(): Promise<Record<number, string[]>> {
+  const byUser: Record<number, string[]> = {};
+  const { data } = await supabase.from('user_alert_emails').select('user_id, email');
+  for (const r of (data ?? []) as any[]) {
+    (byUser[r.user_id] ??= []).push(r.email);
+  }
+  return byUser;
 }
 
 export async function fetchUsers(): Promise<ManagedUser[]> {
@@ -611,7 +627,9 @@ export async function fetchUsers(): Promise<ManagedUser[]> {
     (byUser[r.user_id] ??= []).push({ id: r.device_id, uuid: r.devices?.device_uuid ?? null });
   }
 
-  return ((data ?? []) as any[]).map((u) => normaliseUser(u, byUser[u.id] ?? []));
+  const emails = await alertEmailsByUser();
+
+  return ((data ?? []) as any[]).map((u) => normaliseUser(u, byUser[u.id] ?? [], emails[u.id] ?? []));
 }
 
 export async function fetchUserById(userId: number): Promise<ManagedUser | null> {
@@ -631,7 +649,13 @@ export async function fetchUserById(userId: number): Promise<ManagedUser | null>
     uuid: r.devices?.device_uuid ?? null,
   }));
 
-  return normaliseUser(data, assigned);
+  const { data: emailRows } = await supabase
+    .from('user_alert_emails')
+    .select('email')
+    .eq('user_id', userId);
+  const alertEmails = ((emailRows ?? []) as any[]).map((r) => r.email);
+
+  return normaliseUser(data, assigned, alertEmails);
 }
 
 export async function createUser(input: CreateUserInput): Promise<{ id: number | undefined; username: string }> {
