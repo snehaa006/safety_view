@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ChevronLeft, Pencil } from 'lucide-react';
 import { fetchUserById } from '@/services/api';
+import { parseTodos } from '@/lib/todos';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -105,7 +106,29 @@ export default function UserDetailPage() {
               )
             }
           />
-          <Row label="Notes" value={user.remarks} />
+          <Row
+            label="Notes / To-do"
+            value={
+              parseTodos(user.remarks).length === 0 ? (
+                '—'
+              ) : (
+                <ul className="flex flex-col gap-1">
+                  {parseTodos(user.remarks).map((t, i) => (
+                    <li key={i} className="flex items-center gap-2">
+                      <span
+                        className={`flex h-4 w-4 items-center justify-center rounded border text-[10px] ${
+                          t.done ? 'border-ok-strong bg-ok-bg text-ok-text' : 'border-border'
+                        }`}
+                      >
+                        {t.done ? '✓' : ''}
+                      </span>
+                      <span className={t.done ? 'text-muted-foreground line-through' : ''}>{t.text}</span>
+                    </li>
+                  ))}
+                </ul>
+              )
+            }
+          />
         </div>
       </Card>
     </section>

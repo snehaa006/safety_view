@@ -37,6 +37,7 @@ import { ROLE_OPTIONS, type Group, type ManagedUser } from '@/types';
 
 const SEARCH_FIELDS = [
   { value: 'all', label: 'All fields' },
+  { value: 'id', label: 'ID' },
   { value: 'username', label: 'Username' },
   { value: 'email', label: 'Email' },
   { value: 'role', label: 'Role' },
@@ -116,6 +117,7 @@ export default function UserManagementPage() {
 
   function fieldsOf(u: ManagedUser): Record<string, string> {
     return {
+      id: String(u.id),
       username: u.username ?? '',
       email: u.email ?? '',
       role: u.role ?? '',
