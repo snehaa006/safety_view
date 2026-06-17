@@ -74,10 +74,10 @@ export async function login(username: string, password: string): Promise<LoginRe
   if (profileRow) profile = profileRow;
 
   const user: AuthUser = {
-    id: account.id,
-    username: account.username,
-    role: (account.role ?? profile.role) as string,
-    email: (account.email ?? profile.email) as string | null,
+    id: account.out_id,
+    username: account.out_username,
+    role: (account.out_role ?? profile.role) as string,
+    email: (account.out_email ?? profile.email) as string | null,
     device_id: (profile.device_id as number | null) ?? null,
     group_id: (profile.group_id as number | null) ?? null,
     organization_id: (profile.organization_id as number | null) ?? null,
@@ -96,8 +96,8 @@ export async function login(username: string, password: string): Promise<LoginRe
     hierarchy_level: user.hierarchy_level ?? null,
     exp: Date.now() + 8 * 60 * 60 * 1000,
   };
-  const token = `supabase.${btoa(JSON.stringify(payload))}.sig`;
 
+  const token = `supabase.${btoa(JSON.stringify(payload))}.sig`;
   localStorage.setItem(AUTH_TOKEN_KEY, token);
   return { token, user };
 }
@@ -226,7 +226,7 @@ export async function createDevice(input: {
       group_id: input.group_id || null,
     })
     .select('id, device_uuid')
-    .single();
+    .maybeSingle();
 
   if (error) throw new Error(error.message);
   return data as { id: number; device_uuid: string };
@@ -245,7 +245,7 @@ export async function updateDevice(
     .update(patch)
     .eq('id', id)
     .select('id')
-    .single();
+    .maybeSingle();
 
   if (error) throw new Error(error.message);
   return data as { id: number };
@@ -272,7 +272,7 @@ export async function fetchDeviceById(id: number): Promise<DeviceInfo | null> {
     .from('devices')
     .select('id, device_uuid, device_remarks, status, health_status, group_id, groups ( group_name )')
     .eq('id', id)
-    .single();
+    .maybeSingle();
   if (error || !data) return null;
   const d = data as any;
   return {
@@ -518,7 +518,7 @@ export async function acknowledgeEvent(eventId: number): Promise<{ id: number; i
     .update({ is_acknowledged: true, acknowledged_at: new Date().toISOString() })
     .eq('id', eventId)
     .select('id, is_acknowledged')
-    .single();
+    .maybeSingle();
 
   if (error) throw new Error(error.message);
   return data as { id: number; is_acknowledged: boolean };
@@ -608,7 +608,11 @@ export async function fetchUsers(): Promise<ManagedUser[]> {
 }
 
 export async function fetchUserById(userId: number): Promise<ManagedUser | null> {
-  const { data, error } = await supabase.from('users').select(USER_SELECT).eq('id', userId).single();
+  const { data, error } = await supabase
+    .from('users')
+    .select(USER_SELECT)
+    .eq('id', userId)
+    .maybeSingle();
   if (error || !data) return null;
 
   const { data: udRows } = await supabase
@@ -675,7 +679,7 @@ export async function updateUser(userId: number, fields: UpdateUserInput): Promi
     .update(patch)
     .eq('id', userId)
     .select('id')
-    .single();
+    .maybeSingle();
 
   if (error) throw new Error(error.message);
   return data as { id: number };
@@ -703,7 +707,7 @@ export async function toggleUserActive(
     .update({ is_active: isActive })
     .eq('id', userId)
     .select('id, is_active')
-    .single();
+    .maybeSingle();
 
   if (error) throw new Error(error.message);
   return data as { id: number; is_active: boolean };
