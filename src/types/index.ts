@@ -142,6 +142,7 @@ export interface ManagedUser {
   role: Role | string;
   is_active: boolean;
   created_at: string;
+  updated_at: string | null;
   last_login: string | null;
   first_name: string | null;
   last_name: string | null;
@@ -150,11 +151,13 @@ export interface ManagedUser {
   org_name: string | null;
   organization_id: number | null;
   organization_name: string | null;
+  organization_logo: string | null;
   hierarchy_level: number | null;
   parent_user_id: number | null;
   device_type: string | null;
   remarks: string | null;
   alert_email_enabled: boolean | null;
+  alert_emails: string[];
   device_id: number | null;
   group_id: number | null;
   device_uuid: string | null;

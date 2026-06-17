@@ -90,9 +90,21 @@ export default function UserDetailPage() {
           <Row label="Primary Device" value={user.device_uuid} />
           <Row label="Assigned Devices" value={devices.length ? devices.join(', ') : '—'} />
           <Row label="Alert Email" value={user.alert_email_enabled ? 'Enabled' : 'Disabled'} />
+          <Row label="Alert Email List" value={user.alert_emails.length ? user.alert_emails.join(', ') : '—'} />
           <Row label="Active" value={user.is_active ? 'Yes' : 'No'} />
           <Row label="Last Login" value={user.last_login ? new Date(user.last_login).toLocaleString() : '—'} />
           <Row label="Created" value={formatDate(user.created_at)} />
+          <Row label="Updated At" value={user.updated_at ? new Date(user.updated_at).toLocaleString() : '—'} />
+          <Row
+            label="Organization Logo"
+            value={
+              user.organization_logo ? (
+                <img src={user.organization_logo} alt="logo" className="h-8 w-8 rounded object-contain" />
+              ) : (
+                '—'
+              )
+            }
+          />
           <Row label="Notes" value={user.remarks} />
         </div>
       </Card>

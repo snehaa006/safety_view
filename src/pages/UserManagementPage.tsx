@@ -253,105 +253,134 @@ export default function UserManagementPage() {
         </div>
       </Card>
 
-      <Card>
+      <Card className="overflow-hidden">
         {loading ? (
           <div className="p-6 text-center text-sm text-muted-foreground">Loading users…</div>
         ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>ID</TableHead>
-                <TableHead>User ID</TableHead>
-                <TableHead>Username</TableHead>
-                <TableHead>Name</TableHead>
-                <TableHead>Email</TableHead>
-                <TableHead>Mobile</TableHead>
-                <TableHead>Role</TableHead>
-                <TableHead>Level</TableHead>
-                <TableHead>Group</TableHead>
-                <TableHead>Organization</TableHead>
-                <TableHead>Devices</TableHead>
-                <TableHead>Last Login</TableHead>
-                <TableHead>Created</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filtered.map((u) => {
-                const deviceUuids = u.assigned_device_uuids.length
-                  ? u.assigned_device_uuids
-                  : u.device_uuid
-                  ? [u.device_uuid]
-                  : [];
-                const name = `${u.first_name ?? ''} ${u.last_name ?? ''}`.trim();
-                return (
-                  <TableRow
-                    key={u.id}
-                    className={`cursor-pointer ${!u.is_active ? 'opacity-60' : ''}`}
-                    onClick={() => navigate(`/users/${u.id}`)}
-                  >
-                    <TableCell className="text-muted-foreground">{u.id}</TableCell>
-                    <TableCell className="font-mono text-xs text-muted-foreground">
-                      <Highlight text={u.customer_id || '—'} query={hq('customer_id')} />
-                    </TableCell>
-                    <TableCell className="font-semibold">
-                      <Highlight text={u.username} query={hq('username')} />
-                    </TableCell>
-                    <TableCell className="whitespace-nowrap">
-                      <Highlight text={name || '—'} query={hq('name')} />
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      <Highlight text={u.email || '—'} query={hq('email')} />
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      <Highlight text={u.mobile_no || '—'} query={hq('mobile_no')} />
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={roleBadgeVariant(u.role)}>{String(u.role).replace(/_/g, ' ')}</Badge>
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">{u.hierarchy_level ?? '—'}</TableCell>
-                    <TableCell className="whitespace-nowrap text-muted-foreground">
-                      <Highlight text={u.group_name || '—'} query={hq('group_name')} />
-                    </TableCell>
-                    <TableCell className="whitespace-nowrap text-muted-foreground">
-                      <Highlight text={u.organization_name || u.org_name || '—'} query={hq('organization_name')} />
-                    </TableCell>
-                    <TableCell className="text-muted-foreground" title={deviceUuids.join(', ')}>
-                      {deviceUuids.length === 0 ? '—' : deviceUuids.length === 1 ? deviceUuids[0] : `${deviceUuids.length} devices`}
-                    </TableCell>
-                    <TableCell className="whitespace-nowrap text-muted-foreground">{fmtDateTime(u.last_login)}</TableCell>
-                    <TableCell className="whitespace-nowrap text-muted-foreground">{formatDate(u.created_at)}</TableCell>
-                    <TableCell>
-                      <span className={u.is_active ? 'text-ok-text' : 'text-muted-foreground'}>
-                        {u.is_active ? 'Active' : 'Inactive'}
-                      </span>
-                    </TableCell>
-                    <TableCell onClick={(e) => e.stopPropagation()}>
-                      <div className="flex justify-end gap-2">
-                        <Button variant="outline" size="sm" onClick={() => navigate(`/users/${u.id}/edit`)}>
-                          Edit
-                        </Button>
-                        <Button variant="outline" size="sm" onClick={() => handleToggleActive(u)}>
-                          {u.is_active ? 'Deactivate' : 'Activate'}
-                        </Button>
-                        <Button variant="destructive" size="sm" onClick={() => openDelete(u)}>
-                          Delete
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-              {filtered.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={15} className="py-6 text-center text-muted-foreground">
-                    No users match your search.
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
+          <div className="max-h-[68vh] overflow-auto">
+            <table className="w-full caption-bottom text-sm">
+              <thead className="sticky top-0 z-10 bg-secondary">
+                <tr className="border-b border-border [&>th]:whitespace-nowrap [&>th]:px-3 [&>th]:py-2.5 [&>th]:text-left [&>th]:text-xs [&>th]:font-semibold [&>th]:uppercase [&>th]:tracking-wide [&>th]:text-muted-foreground">
+                  <th>Id</th>
+                  <th>Customer ID</th>
+                  <th>Mobile No</th>
+                  <th>Email</th>
+                  <th>User Access Right</th>
+                  <th>First Name</th>
+                  <th>Last Name</th>
+                  <th>Created</th>
+                  <th>Updated At</th>
+                  <th>Last Login</th>
+                  <th>Fire Alarm ID</th>
+                  <th>Account</th>
+                  <th>User Group</th>
+                  <th>Remarks</th>
+                  <th>Device Type</th>
+                  <th>Alert Email</th>
+                  <th>Alert Email List</th>
+                  <th>Organization</th>
+                  <th>Logo</th>
+                  <th className="sticky right-0 bg-secondary text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((u, i) => {
+                  const deviceUuids = u.assigned_device_uuids.length
+                    ? u.assigned_device_uuids
+                    : u.device_uuid
+                    ? [u.device_uuid]
+                    : [];
+                  const name = (s: string | null) => s || '—';
+                  return (
+                    <tr
+                      key={u.id}
+                      className={`cursor-pointer border-b border-border transition-colors hover:bg-muted/60 ${
+                        i % 2 ? 'bg-muted/20' : ''
+                      } ${!u.is_active ? 'opacity-60' : ''} [&>td]:whitespace-nowrap [&>td]:px-3 [&>td]:py-2.5`}
+                      onClick={() => navigate(`/users/${u.id}`)}
+                    >
+                      <td className="text-muted-foreground">{u.id}</td>
+                      <td className="font-mono text-xs text-muted-foreground">
+                        <Highlight text={u.customer_id || '—'} query={hq('customer_id')} />
+                      </td>
+                      <td className="text-muted-foreground">
+                        <Highlight text={u.mobile_no || '—'} query={hq('mobile_no')} />
+                      </td>
+                      <td>
+                        <Highlight text={u.email || '—'} query={hq('email')} />
+                      </td>
+                      <td>
+                        <Badge variant={roleBadgeVariant(u.role)}>{String(u.role).replace(/_/g, ' ')}</Badge>
+                      </td>
+                      <td><Highlight text={name(u.first_name)} query={hq('name')} /></td>
+                      <td><Highlight text={name(u.last_name)} query={hq('name')} /></td>
+                      <td className="text-muted-foreground">{fmtDateTime(u.created_at)}</td>
+                      <td className="text-muted-foreground">{fmtDateTime(u.updated_at)}</td>
+                      <td className="text-muted-foreground">{fmtDateTime(u.last_login)}</td>
+                      <td className="font-mono text-xs text-muted-foreground" title={deviceUuids.join(', ')}>
+                        {deviceUuids.length === 0 ? '—' : deviceUuids.length === 1 ? deviceUuids[0] : `${deviceUuids.length} devices`}
+                      </td>
+                      <td>
+                        <Badge variant={u.is_active ? 'ok' : 'off'}>{u.is_active ? 'Enabled' : 'Disabled'}</Badge>
+                      </td>
+                      <td className="text-muted-foreground">
+                        <Highlight text={u.group_name || '—'} query={hq('group_name')} />
+                      </td>
+                      <td className="max-w-[180px] truncate text-muted-foreground" title={u.remarks || ''}>
+                        {u.remarks || '—'}
+                      </td>
+                      <td className="text-muted-foreground">{u.device_type || '—'}</td>
+                      <td>
+                        <Badge variant={u.alert_email_enabled ? 'ok' : 'off'}>
+                          {u.alert_email_enabled ? 'On' : 'Off'}
+                        </Badge>
+                      </td>
+                      <td className="text-muted-foreground" title={u.alert_emails.join(', ')}>
+                        {u.alert_emails.length === 0
+                          ? '—'
+                          : u.alert_emails.length === 1
+                          ? u.alert_emails[0]
+                          : `${u.alert_emails.length} emails`}
+                      </td>
+                      <td className="text-muted-foreground">
+                        <Highlight text={u.organization_name || u.org_name || '—'} query={hq('organization_name')} />
+                      </td>
+                      <td>
+                        {u.organization_logo ? (
+                          <img src={u.organization_logo} alt="logo" className="h-6 w-6 rounded object-contain" />
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </td>
+                      <td
+                        className="sticky right-0 bg-card"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <div className="flex justify-end gap-2">
+                          <Button variant="outline" size="sm" onClick={() => navigate(`/users/${u.id}/edit`)}>
+                            Edit
+                          </Button>
+                          <Button variant="outline" size="sm" onClick={() => handleToggleActive(u)}>
+                            {u.is_active ? 'Disable' : 'Enable'}
+                          </Button>
+                          <Button variant="destructive" size="sm" onClick={() => openDelete(u)}>
+                            Delete
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {filtered.length === 0 && (
+                  <tr>
+                    <td colSpan={20} className="py-6 text-center text-muted-foreground">
+                      No users match your search.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         )}
       </Card>
 
