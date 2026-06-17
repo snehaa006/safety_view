@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { Droplet, LayoutGrid, Server, Settings, Users } from 'lucide-react';
+import { Building2, Cog, Droplet, FolderTree, LayoutGrid, Server, Settings, Users } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { cn } from '@/lib/utils';
 
@@ -12,8 +12,11 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   { to: '/devices', label: 'Devices', icon: Server },
-  { to: '/device-management', label: 'Device Management', icon: Settings, adminOnly: true },
+  { to: '/device-management', label: 'Device Management', icon: Cog, adminOnly: true },
   { to: '/users', label: 'User Management', icon: Users, adminOnly: true },
+  { to: '/organizations', label: 'Organizations', icon: Building2, adminOnly: true },
+  { to: '/groups', label: 'Groups', icon: FolderTree, adminOnly: true },
+  { to: '/settings', label: 'Settings', icon: Settings },
 ];
 
 export default function Sidebar() {

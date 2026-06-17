@@ -17,10 +17,12 @@ import type {
   AuthUser,
   CreateUserInput,
   Device,
+  DeviceHealth,
   DeviceStatus,
   Group,
   LoginResult,
   ManagedUser,
+  Organization,
   SafetyEvent,
   TokenPayload,
   UpdateUserInput,
@@ -32,7 +34,8 @@ import type {
 const AUTH_TOKEN_KEY = 'fwd_auth_token';
 
 function isAdmin(role: string | undefined | null): boolean {
-  return (role || '').toUpperCase() === 'ADMIN';
+  const r = (role || '').toUpperCase();
+  return r === 'ADMIN' || r === 'SUPER_ADMIN';
 }
 
 // Read device_ids explicitly assigned to a user via the user_devices join
@@ -65,7 +68,7 @@ export async function login(username: string, password: string): Promise<LoginRe
   let profile: Record<string, unknown> = {};
   const { data: profileRow } = await supabase
     .from('users')
-    .select('id, username, email, role, device_id, group_id, first_name, last_name')
+    .select('id, username, email, role, device_id, group_id, organization_id, hierarchy_level, first_name, last_name')
     .eq('id', account.id)
     .single();
   if (profileRow) profile = profileRow;
@@ -77,6 +80,8 @@ export async function login(username: string, password: string): Promise<LoginRe
     email: (account.email ?? profile.email) as string | null,
     device_id: (profile.device_id as number | null) ?? null,
     group_id: (profile.group_id as number | null) ?? null,
+    organization_id: (profile.organization_id as number | null) ?? null,
+    hierarchy_level: (account.hierarchy_level ?? profile.hierarchy_level ?? null) as number | null,
     first_name: (profile.first_name as string | null) ?? null,
     last_name: (profile.last_name as string | null) ?? null,
   };
@@ -87,6 +92,8 @@ export async function login(username: string, password: string): Promise<LoginRe
     id: user.id,
     device_id: user.device_id ?? null,
     group_id: user.group_id ?? null,
+    organization_id: user.organization_id ?? null,
+    hierarchy_level: user.hierarchy_level ?? null,
     exp: Date.now() + 8 * 60 * 60 * 1000,
   };
   const token = `supabase.${btoa(JSON.stringify(payload))}.sig`;
@@ -152,6 +159,7 @@ export async function fetchDevices(user: AuthUser | null): Promise<Device[]> {
       device_uuid,
       device_remarks,
       status,
+      health_status,
       group_id,
       updated_at,
       created_at,
@@ -196,6 +204,7 @@ export async function fetchDevices(user: AuthUser | null): Promise<Device[]> {
     device_uuid: d.device_uuid,
     device_remarks: d.device_remarks,
     status: (assignedSet.has(d.id) ? 'ASSIGNED' : 'NOT_ASSIGNED') as DeviceStatus,
+    health_status: d.health_status ?? null,
     group_id: d.group_id,
     group_name: d.groups?.group_name ?? null,
     updated_at: d.updated_at,
@@ -253,6 +262,7 @@ export interface DeviceInfo {
   device_uuid: string;
   device_remarks: string | null;
   status: DeviceStatus;
+  health_status: DeviceHealth | null;
   group_id: number | null;
   group_name: string | null;
 }
@@ -260,7 +270,7 @@ export interface DeviceInfo {
 export async function fetchDeviceById(id: number): Promise<DeviceInfo | null> {
   const { data, error } = await supabase
     .from('devices')
-    .select('id, device_uuid, device_remarks, status, group_id, groups ( group_name )')
+    .select('id, device_uuid, device_remarks, status, health_status, group_id, groups ( group_name )')
     .eq('id', id)
     .single();
   if (error || !data) return null;
@@ -270,9 +280,122 @@ export async function fetchDeviceById(id: number): Promise<DeviceInfo | null> {
     device_uuid: d.device_uuid,
     device_remarks: d.device_remarks,
     status: d.status,
+    health_status: d.health_status ?? null,
     group_id: d.group_id,
     group_name: d.groups?.group_name ?? null,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Organizations (admin)
+// ---------------------------------------------------------------------------
+
+export async function fetchOrganizations(): Promise<Organization[]> {
+  const { data, error } = await supabase
+    .from('organizations')
+    .select('id, organization_name, logo_path, is_active, created_at')
+    .order('organization_name', { ascending: true });
+  if (error) throw new Error(error.message);
+  return (data ?? []) as Organization[];
+}
+
+export async function createOrganization(input: {
+  organization_name: string;
+  logo_path?: string | null;
+  is_active?: boolean;
+}): Promise<{ id: number }> {
+  const { data, error } = await supabase
+    .from('organizations')
+    .insert({
+      organization_name: input.organization_name,
+      logo_path: input.logo_path || null,
+      is_active: input.is_active ?? true,
+    })
+    .select('id')
+    .single();
+  if (error) throw new Error(error.message);
+  return data as { id: number };
+}
+
+export async function updateOrganization(
+  id: number,
+  fields: { organization_name?: string; logo_path?: string | null; is_active?: boolean }
+): Promise<{ id: number }> {
+  const patch: Record<string, unknown> = {};
+  if (fields.organization_name !== undefined) patch.organization_name = fields.organization_name;
+  if (fields.logo_path !== undefined) patch.logo_path = fields.logo_path || null;
+  if (fields.is_active !== undefined) patch.is_active = fields.is_active;
+  const { data, error } = await supabase
+    .from('organizations')
+    .update(patch)
+    .eq('id', id)
+    .select('id')
+    .single();
+  if (error) throw new Error(error.message);
+  return data as { id: number };
+}
+
+export async function deleteOrganization(id: number): Promise<{ id: number }> {
+  const { error } = await supabase.from('organizations').delete().eq('id', id);
+  if (error) throw new Error(error.message);
+  return { id };
+}
+
+// ---------------------------------------------------------------------------
+// Groups (admin CRUD)
+// ---------------------------------------------------------------------------
+
+export async function createGroup(input: {
+  group_name: string;
+  description?: string | null;
+}): Promise<{ id: number }> {
+  const { data, error } = await supabase
+    .from('groups')
+    .insert({ group_name: input.group_name, description: input.description || null })
+    .select('id')
+    .single();
+  if (error) throw new Error(error.message);
+  return data as { id: number };
+}
+
+export async function updateGroup(
+  id: number,
+  fields: { group_name?: string; description?: string | null }
+): Promise<{ id: number }> {
+  const patch: Record<string, unknown> = {};
+  if (fields.group_name !== undefined) patch.group_name = fields.group_name;
+  if (fields.description !== undefined) patch.description = fields.description || null;
+  const { data, error } = await supabase
+    .from('groups')
+    .update(patch)
+    .eq('id', id)
+    .select('id')
+    .single();
+  if (error) throw new Error(error.message);
+  return data as { id: number };
+}
+
+export async function deleteGroup(id: number): Promise<{ id: number }> {
+  const { error } = await supabase.from('groups').delete().eq('id', id);
+  if (error) throw new Error(error.message);
+  return { id };
+}
+
+// ---------------------------------------------------------------------------
+// Change own password (calls the change_password RPC)
+// ---------------------------------------------------------------------------
+
+export async function changePassword(
+  userId: number,
+  oldPassword: string,
+  newPassword: string
+): Promise<void> {
+  const { error } = await supabase.rpc('change_password', {
+    p_user_id: userId,
+    p_old_password: oldPassword,
+    p_new_password: newPassword,
+  });
+  if (error) throw new Error(error.message);
 }
 
 // ---------------------------------------------------------------------------
@@ -425,11 +548,14 @@ export function summariseZones(zones: Zone[]): ZoneSummary {
 // ---------------------------------------------------------------------------
 
 const USER_SELECT = `
-  id, username, email, role, is_active, created_at,
-  first_name, last_name, mobile_no, org_name,
+  id, username, email, role, is_active, created_at, last_login,
+  first_name, last_name, mobile_no, customer_id, org_name,
+  organization_id, hierarchy_level, parent_user_id, device_type,
+  remarks, alert_email_enabled,
   device_id, group_id,
   devices!device_id ( device_uuid ),
-  groups ( group_name )
+  groups ( group_name ),
+  organizations ( organization_name )
 `;
 
 function normaliseUser(u: any, assigned: { id: number; uuid: string | null }[]): ManagedUser {
@@ -440,10 +566,19 @@ function normaliseUser(u: any, assigned: { id: number; uuid: string | null }[]):
     role: u.role,
     is_active: u.is_active,
     created_at: u.created_at,
+    last_login: u.last_login ?? null,
     first_name: u.first_name ?? null,
     last_name: u.last_name ?? null,
     mobile_no: u.mobile_no ?? null,
+    customer_id: u.customer_id ?? null,
     org_name: u.org_name ?? null,
+    organization_id: u.organization_id ?? null,
+    organization_name: u.organizations?.organization_name ?? null,
+    hierarchy_level: u.hierarchy_level ?? null,
+    parent_user_id: u.parent_user_id ?? null,
+    device_type: u.device_type ?? null,
+    remarks: u.remarks ?? null,
+    alert_email_enabled: u.alert_email_enabled ?? null,
     device_id: u.device_id ?? null,
     group_id: u.group_id ?? null,
     device_uuid: u.devices?.device_uuid ?? null,
@@ -510,7 +645,17 @@ export async function createUser(input: CreateUserInput): Promise<{ id: number |
     .select('id')
     .eq('username', input.username)
     .single();
-  return { id: (row as any)?.id, username: input.username };
+  const newId = (row as any)?.id as number | undefined;
+
+  // The RPC doesn't accept organization_id / remarks — patch them after.
+  if (newId != null && (input.organization_id !== undefined || input.remarks !== undefined)) {
+    const patch: Record<string, unknown> = {};
+    if (input.organization_id !== undefined) patch.organization_id = input.organization_id || null;
+    if (input.remarks !== undefined) patch.remarks = input.remarks || null;
+    await supabase.from('users').update(patch).eq('id', newId);
+  }
+
+  return { id: newId, username: input.username };
 }
 
 export async function updateUser(userId: number, fields: UpdateUserInput): Promise<{ id: number }> {
@@ -522,6 +667,8 @@ export async function updateUser(userId: number, fields: UpdateUserInput): Promi
   if (fields.first_name !== undefined) patch.first_name = fields.first_name || null;
   if (fields.last_name !== undefined) patch.last_name = fields.last_name || null;
   if (fields.mobile_no !== undefined) patch.mobile_no = fields.mobile_no || null;
+  if (fields.organization_id !== undefined) patch.organization_id = fields.organization_id || null;
+  if (fields.remarks !== undefined) patch.remarks = fields.remarks || null;
 
   const { data, error } = await supabase
     .from('users')

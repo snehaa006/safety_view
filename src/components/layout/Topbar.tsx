@@ -7,6 +7,9 @@ function titleForPath(pathname: string): string {
   if (matchPath('/devices', pathname)) return 'Devices';
   if (matchPath('/devices/*', pathname)) return 'Device Dashboard';
   if (matchPath('/device-management', pathname)) return 'Device Management';
+  if (matchPath('/organizations', pathname)) return 'Organizations';
+  if (matchPath('/groups', pathname)) return 'Groups';
+  if (matchPath('/settings', pathname)) return 'Settings';
   if (matchPath('/users/new', pathname)) return 'New User';
   if (matchPath('/users/:id/edit', pathname)) return 'Edit User';
   if (matchPath('/users/:id', pathname)) return 'User Details';
