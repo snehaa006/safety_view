@@ -16,6 +16,7 @@ import { supabase } from './supabase';
 import type {
   AuditLogEntry,
   AuthUser,
+  Building,
   CreateUserInput,
   Device,
   DeviceHealth,
@@ -77,7 +78,7 @@ export async function login(username: string, password: string): Promise<LoginRe
   let profile: Record<string, unknown> = {};
   const { data: profileRow } = await supabase
     .from('users')
-    .select('id, username, email, role, device_id, group_id, organization_id, hierarchy_level, first_name, last_name')
+    .select('id, username, email, role, device_id, group_id, building_id, organization_id, hierarchy_level, first_name, last_name')
     .eq('id', accId)
     .single();
   if (profileRow) profile = profileRow;
@@ -89,6 +90,7 @@ export async function login(username: string, password: string): Promise<LoginRe
     email: (accEmail ?? profile.email) as string | null,
     device_id: (profile.device_id as number | null) ?? null,
     group_id: (profile.group_id as number | null) ?? null,
+    building_id: (profile.building_id as number | null) ?? null,
     organization_id: (profile.organization_id as number | null) ?? null,
     hierarchy_level: (accHier ?? profile.hierarchy_level ?? null) as number | null,
     first_name: (profile.first_name as string | null) ?? null,
@@ -101,6 +103,7 @@ export async function login(username: string, password: string): Promise<LoginRe
     id: user.id,
     device_id: user.device_id ?? null,
     group_id: user.group_id ?? null,
+    building_id: user.building_id ?? null,
     organization_id: user.organization_id ?? null,
     hierarchy_level: user.hierarchy_level ?? null,
     exp: Date.now() + 8 * 60 * 60 * 1000,
@@ -142,23 +145,58 @@ export async function fetchGroups(): Promise<Group[]> {
 }
 
 // ---------------------------------------------------------------------------
+// Hierarchy: which buildings a user can see ("downward visibility").
+//   • SUPER_ADMIN / ADMIN → null (all)
+//   • NATIONAL/REGIONAL/DISTRICT MANAGER → buildings whose matching
+//     manager column references them
+//   • SUPERVISOR → buildings they supervise
+//   • BUILDING_OPERATOR / others → their single assigned building
+// ---------------------------------------------------------------------------
+
+const ROLE_BUILDING_COLUMN: Record<string, string> = {
+  NATIONAL_MANAGER: 'national_manager_id',
+  REGIONAL_MANAGER: 'regional_manager_id',
+  DISTRICT_MANAGER: 'district_manager_id',
+  SUPERVISOR: 'supervisor_id',
+};
+
+export async function visibleBuildingIds(user: AuthUser | null): Promise<number[] | null> {
+  if (isAdmin(user?.role)) return null; // all buildings
+  const role = (user?.role || '').toUpperCase();
+  const col = ROLE_BUILDING_COLUMN[role];
+  if (col && user?.id != null) {
+    const { data, error } = await supabase.from('buildings').select('id').eq(col, user.id);
+    if (error) return [];
+    return (data ?? []).map((r) => r.id);
+  }
+  if (user?.building_id != null) return [user.building_id];
+  return [];
+}
+
+// ---------------------------------------------------------------------------
 // Devices
 // ---------------------------------------------------------------------------
 
-export async function fetchDevices(user: AuthUser | null): Promise<Device[]> {
+export async function fetchDevices(user: AuthUser | null, buildingId?: number): Promise<Device[]> {
   let allowedIds: number[] | null = null;
   if (!isAdmin(user?.role)) {
-    let ids = await getUserDeviceIds(user?.id);
-    if (ids.length === 0 && user?.group_id != null) {
-      const { data: groupDevices } = await supabase
-        .from('devices')
-        .select('id')
-        .eq('group_id', user.group_id);
-      ids = (groupDevices ?? []).map((r) => r.id);
+    const ids = new Set<number>();
+    for (const d of await getUserDeviceIds(user?.id)) ids.add(d);
+    if (user?.group_id != null) {
+      const { data: groupDevices } = await supabase.from('devices').select('id').eq('group_id', user.group_id);
+      for (const r of (groupDevices ?? []) as any[]) ids.add(r.id);
     }
-    if (ids.length === 0 && user?.device_id != null) ids = [user.device_id];
-    if (ids.length === 0) return [];
-    allowedIds = ids;
+    // Devices inside the buildings this user can see (hierarchy)
+    const bIds = await visibleBuildingIds(user);
+    if (bIds === null) {
+      // (admin handled above; non-admin won't hit this)
+    } else if (bIds.length > 0) {
+      const { data: bDevices } = await supabase.from('devices').select('id').in('building_id', bIds);
+      for (const r of (bDevices ?? []) as any[]) ids.add(r.id);
+    }
+    if (user?.device_id != null) ids.add(user.device_id);
+    if (ids.size === 0) return [];
+    allowedIds = Array.from(ids);
   }
 
   let query = supabase
@@ -170,13 +208,16 @@ export async function fetchDevices(user: AuthUser | null): Promise<Device[]> {
       status,
       health_status,
       group_id,
+      building_id,
       updated_at,
       created_at,
-      groups ( group_name )
+      groups ( group_name ),
+      buildings ( building_name )
     `)
     .order('id', { ascending: true });
 
   if (allowedIds) query = query.in('id', allowedIds);
+  if (buildingId != null) query = query.eq('building_id', buildingId);
 
   const { data: devices, error } = await query;
   if (error) throw new Error(error.message);
@@ -216,6 +257,8 @@ export async function fetchDevices(user: AuthUser | null): Promise<Device[]> {
     health_status: d.health_status ?? null,
     group_id: d.group_id,
     group_name: d.groups?.group_name ?? null,
+    building_id: d.building_id ?? null,
+    building_name: d.buildings?.building_name ?? null,
     updated_at: d.updated_at,
     created_at: d.created_at,
     summary: summaryByDevice[d.id] ?? { totalZones: 0, fireAlarms: 0, faults: 0 },
@@ -226,6 +269,7 @@ export async function createDevice(input: {
   device_uuid: string;
   device_remarks?: string;
   group_id?: number | null;
+  building_id?: number | null;
 }): Promise<{ id: number; device_uuid: string }> {
   const { data, error } = await supabase
     .from('devices')
@@ -233,6 +277,7 @@ export async function createDevice(input: {
       device_uuid: input.device_uuid,
       device_remarks: input.device_remarks || null,
       group_id: input.group_id || null,
+      building_id: input.building_id || null,
     })
     .select('id, device_uuid')
     .maybeSingle();
@@ -243,11 +288,12 @@ export async function createDevice(input: {
 
 export async function updateDevice(
   id: number,
-  fields: { device_remarks?: string; group_id?: number | null }
+  fields: { device_remarks?: string; group_id?: number | null; building_id?: number | null }
 ): Promise<{ id: number }> {
   const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
   if (fields.device_remarks !== undefined) patch.device_remarks = fields.device_remarks;
   if (fields.group_id !== undefined) patch.group_id = fields.group_id || null;
+  if (fields.building_id !== undefined) patch.building_id = fields.building_id || null;
 
   const { data, error } = await supabase
     .from('devices')
@@ -293,6 +339,119 @@ export async function fetchDeviceById(id: number): Promise<DeviceInfo | null> {
     group_id: d.group_id,
     group_name: d.groups?.group_name ?? null,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Buildings (hierarchy: building contains devices; managed up the chain)
+// ---------------------------------------------------------------------------
+
+const BUILDING_SELECT = `
+  id, building_name, address, location_id,
+  supervisor_id, district_manager_id, regional_manager_id, national_manager_id,
+  created_at, locations ( name )
+`;
+
+export async function fetchBuildings(user: AuthUser | null): Promise<Building[]> {
+  const ids = await visibleBuildingIds(user);
+  let q = supabase.from('buildings').select(BUILDING_SELECT).order('building_name', { ascending: true });
+  if (ids !== null) {
+    if (ids.length === 0) return [];
+    q = q.in('id', ids);
+  }
+  const { data, error } = await q;
+  if (error) throw new Error(error.message);
+  const buildings = (data ?? []) as any[];
+  if (buildings.length === 0) return [];
+
+  // device health metrics per building
+  const bIds = buildings.map((b) => b.id);
+  const { data: devs } = await supabase.from('devices').select('building_id, health_status').in('building_id', bIds);
+  const metric: Record<number, { deviceCount: number; healthy: number; offline: number; connected: number }> = {};
+  for (const id of bIds) metric[id] = { deviceCount: 0, healthy: 0, offline: 0, connected: 0 };
+  for (const d of (devs ?? []) as any[]) {
+    const m = metric[d.building_id];
+    if (!m) continue;
+    m.deviceCount += 1;
+    m.connected += 1;
+    if (d.health_status === 'OFFLINE') m.offline += 1;
+    else if (d.health_status === 'HEALTHY' || d.health_status == null) m.healthy += 1;
+  }
+
+  return buildings.map((b) => ({
+    id: b.id,
+    building_name: b.building_name,
+    address: b.address ?? null,
+    location_id: b.location_id ?? null,
+    location_name: b.locations?.name ?? null,
+    supervisor_id: b.supervisor_id ?? null,
+    district_manager_id: b.district_manager_id ?? null,
+    regional_manager_id: b.regional_manager_id ?? null,
+    national_manager_id: b.national_manager_id ?? null,
+    created_at: b.created_at ?? null,
+    ...metric[b.id],
+  }));
+}
+
+export async function fetchBuildingById(id: number): Promise<Building | null> {
+  const { data, error } = await supabase.from('buildings').select(BUILDING_SELECT).eq('id', id).maybeSingle();
+  if (error || !data) return null;
+  const b = data as any;
+  return {
+    id: b.id,
+    building_name: b.building_name,
+    address: b.address ?? null,
+    location_id: b.location_id ?? null,
+    location_name: b.locations?.name ?? null,
+    supervisor_id: b.supervisor_id ?? null,
+    district_manager_id: b.district_manager_id ?? null,
+    regional_manager_id: b.regional_manager_id ?? null,
+    national_manager_id: b.national_manager_id ?? null,
+    created_at: b.created_at ?? null,
+    deviceCount: 0,
+    healthy: 0,
+    offline: 0,
+    connected: 0,
+  };
+}
+
+export interface BuildingInput {
+  building_name: string;
+  address?: string | null;
+  location_id?: number | null;
+  supervisor_id?: number | null;
+  district_manager_id?: number | null;
+  regional_manager_id?: number | null;
+  national_manager_id?: number | null;
+}
+
+function buildingPatch(input: Partial<BuildingInput>): Record<string, unknown> {
+  const p: Record<string, unknown> = {};
+  if (input.building_name !== undefined) p.building_name = input.building_name;
+  if (input.address !== undefined) p.address = input.address || null;
+  if (input.location_id !== undefined) p.location_id = input.location_id || null;
+  if (input.supervisor_id !== undefined) p.supervisor_id = input.supervisor_id || null;
+  if (input.district_manager_id !== undefined) p.district_manager_id = input.district_manager_id || null;
+  if (input.regional_manager_id !== undefined) p.regional_manager_id = input.regional_manager_id || null;
+  if (input.national_manager_id !== undefined) p.national_manager_id = input.national_manager_id || null;
+  return p;
+}
+
+export async function createBuilding(input: BuildingInput): Promise<{ id: number }> {
+  const { data, error } = await supabase.from('buildings').insert(buildingPatch(input)).select('id').maybeSingle();
+  if (error) throw new Error(error.message);
+  return data as { id: number };
+}
+
+export async function updateBuilding(id: number, input: Partial<BuildingInput>): Promise<{ id: number }> {
+  const { data, error } = await supabase.from('buildings').update(buildingPatch(input)).eq('id', id).select('id').maybeSingle();
+  if (error) throw new Error(error.message);
+  return data as { id: number };
+}
+
+export async function deleteBuilding(id: number): Promise<{ id: number }> {
+  const { error } = await supabase.from('buildings').delete().eq('id', id);
+  if (error) throw new Error(error.message);
+  return { id };
 }
 
 // ---------------------------------------------------------------------------
@@ -561,7 +720,7 @@ const USER_SELECT = `
   first_name, last_name, mobile_no, customer_id, org_name,
   organization_id, hierarchy_level, parent_user_id, device_type,
   remarks, alert_email_enabled,
-  device_id, group_id,
+  device_id, group_id, building_id,
   devices!device_id ( device_uuid ),
   groups ( group_name ),
   organizations ( organization_name, logo_path )
@@ -570,7 +729,8 @@ const USER_SELECT = `
 function normaliseUser(
   u: any,
   assigned: { id: number; uuid: string | null }[],
-  alertEmails: string[] = []
+  alertEmails: string[] = [],
+  buildingName: string | null = null
 ): ManagedUser {
   return {
     id: u.id,
@@ -597,8 +757,10 @@ function normaliseUser(
     alert_emails: alertEmails,
     device_id: u.device_id ?? null,
     group_id: u.group_id ?? null,
+    building_id: u.building_id ?? null,
     device_uuid: u.devices?.device_uuid ?? null,
     group_name: u.groups?.group_name ?? null,
+    building_name: buildingName,
     assigned_device_ids: assigned.map((d) => d.id),
     assigned_device_uuids: assigned.map((d) => d.uuid).filter((x): x is string => !!x),
   };
@@ -611,6 +773,13 @@ async function alertEmailsByUser(): Promise<Record<number, string[]>> {
     (byUser[r.user_id] ??= []).push(r.email);
   }
   return byUser;
+}
+
+async function buildingNameMap(): Promise<Record<number, string>> {
+  const map: Record<number, string> = {};
+  const { data } = await supabase.from('buildings').select('id, building_name');
+  for (const r of (data ?? []) as any[]) map[r.id] = r.building_name;
+  return map;
 }
 
 export async function fetchUsers(): Promise<ManagedUser[]> {
@@ -630,8 +799,11 @@ export async function fetchUsers(): Promise<ManagedUser[]> {
   }
 
   const emails = await alertEmailsByUser();
+  const bNames = await buildingNameMap();
 
-  return ((data ?? []) as any[]).map((u) => normaliseUser(u, byUser[u.id] ?? [], emails[u.id] ?? []));
+  return ((data ?? []) as any[]).map((u) =>
+    normaliseUser(u, byUser[u.id] ?? [], emails[u.id] ?? [], u.building_id ? bNames[u.building_id] ?? null : null)
+  );
 }
 
 export async function fetchUserById(userId: number): Promise<ManagedUser | null> {
@@ -657,7 +829,17 @@ export async function fetchUserById(userId: number): Promise<ManagedUser | null>
     .eq('user_id', userId);
   const alertEmails = ((emailRows ?? []) as any[]).map((r) => r.email);
 
-  return normaliseUser(data, assigned, alertEmails);
+  let buildingName: string | null = null;
+  if ((data as any).building_id) {
+    const { data: b } = await supabase
+      .from('buildings')
+      .select('building_name')
+      .eq('id', (data as any).building_id)
+      .maybeSingle();
+    buildingName = (b as any)?.building_name ?? null;
+  }
+
+  return normaliseUser(data, assigned, alertEmails, buildingName);
 }
 
 export async function createUser(input: CreateUserInput): Promise<{ id: number | undefined; username: string }> {
@@ -689,12 +871,14 @@ export async function createUser(input: CreateUserInput): Promise<{ id: number |
     newId != null &&
     (input.organization_id !== undefined ||
       input.remarks !== undefined ||
-      input.alert_email_enabled !== undefined)
+      input.alert_email_enabled !== undefined ||
+      input.building_id !== undefined)
   ) {
     const patch: Record<string, unknown> = {};
     if (input.organization_id !== undefined) patch.organization_id = input.organization_id || null;
     if (input.remarks !== undefined) patch.remarks = input.remarks || null;
     if (input.alert_email_enabled !== undefined) patch.alert_email_enabled = input.alert_email_enabled;
+    if (input.building_id !== undefined) patch.building_id = input.building_id || null;
     await supabase.from('users').update(patch).eq('id', newId);
   }
 
@@ -714,6 +898,7 @@ export async function updateUser(userId: number, fields: UpdateUserInput): Promi
   if (fields.remarks !== undefined) patch.remarks = fields.remarks || null;
   if (fields.device_type !== undefined) patch.device_type = fields.device_type || null;
   if (fields.alert_email_enabled !== undefined) patch.alert_email_enabled = fields.alert_email_enabled;
+  if (fields.building_id !== undefined) patch.building_id = fields.building_id || null;
 
   const { data, error } = await supabase
     .from('users')

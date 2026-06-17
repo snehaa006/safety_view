@@ -3,6 +3,7 @@ import { Plus, X } from 'lucide-react';
 import {
   fetchDevices,
   fetchGroups,
+  fetchBuildings,
   createDevice,
   updateDevice,
   deleteDevice,
@@ -36,20 +37,22 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import type { Device, Group } from '@/types';
+import type { Building, Device, Group } from '@/types';
 
 interface DeviceForm {
   device_uuid: string;
   device_remarks: string;
   group_id: string;
+  building_id: string;
 }
 
-const EMPTY: DeviceForm = { device_uuid: '', device_remarks: '', group_id: '' };
+const EMPTY: DeviceForm = { device_uuid: '', device_remarks: '', group_id: '', building_id: '' };
 
 export default function DeviceManagementPage() {
   const { user } = useAuth();
   const [devices, setDevices] = useState<Device[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
+  const [buildings, setBuildings] = useState<Building[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -70,9 +73,10 @@ export default function DeviceManagementPage() {
   async function loadAll() {
     try {
       setLoading(true);
-      const [d, g] = await Promise.all([fetchDevices(user), fetchGroups()]);
+      const [d, g, b] = await Promise.all([fetchDevices(user), fetchGroups(), fetchBuildings(user).catch(() => [])]);
       setDevices(d);
       setGroups(g);
+      setBuildings(b);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load devices');
     } finally {
@@ -94,6 +98,7 @@ export default function DeviceManagementPage() {
       device_uuid: d.device_uuid,
       device_remarks: d.device_remarks || '',
       group_id: d.group_id ? String(d.group_id) : '',
+      building_id: d.building_id ? String(d.building_id) : '',
     });
     setFormError('');
     setSuccess('');
@@ -106,6 +111,7 @@ export default function DeviceManagementPage() {
     const payload = {
       device_remarks: form.device_remarks.trim(),
       group_id: form.group_id ? Number(form.group_id) : null,
+      building_id: form.building_id ? Number(form.building_id) : null,
     };
     try {
       setSubmitting(true);
@@ -194,6 +200,25 @@ export default function DeviceManagementPage() {
                   {groups.map((g) => (
                     <SelectItem key={g.id} value={String(g.id)}>
                       {g.group_name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>Building (contains this device)</Label>
+              <Select
+                value={form.building_id || 'none'}
+                onValueChange={(v) => setForm({ ...form, building_id: v === 'none' ? '' : v })}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="No building" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">— No building —</SelectItem>
+                  {buildings.map((b) => (
+                    <SelectItem key={b.id} value={String(b.id)}>
+                      {b.building_name}
                     </SelectItem>
                   ))}
                 </SelectContent>

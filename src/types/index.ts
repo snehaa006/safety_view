@@ -36,6 +36,7 @@ export interface AuthUser {
   email?: string | null;
   device_id?: number | null;
   group_id?: number | null;
+  building_id?: number | null;
   organization_id?: number | null;
   hierarchy_level?: number | null;
   first_name?: string | null;
@@ -48,6 +49,7 @@ export interface TokenPayload {
   id: number;
   device_id: number | null;
   group_id: number | null;
+  building_id: number | null;
   organization_id: number | null;
   hierarchy_level: number | null;
   exp: number;
@@ -86,9 +88,37 @@ export interface Device {
   health_status: DeviceHealth | null;
   group_id: number | null;
   group_name: string | null;
+  building_id: number | null;
+  building_name: string | null;
   updated_at: string | null;
   created_at: string | null;
   summary: DeviceSummary;
+}
+
+export interface Building {
+  id: number;
+  building_name: string;
+  address: string | null;
+  location_id: number | null;
+  location_name: string | null;
+  supervisor_id: number | null;
+  district_manager_id: number | null;
+  regional_manager_id: number | null;
+  national_manager_id: number | null;
+  created_at: string | null;
+  // device health metrics within this building
+  deviceCount: number;
+  healthy: number;
+  offline: number;
+  connected: number;
+}
+
+export interface ScopeMetrics {
+  buildings: number;
+  devices: number;
+  healthy: number;
+  offline: number;
+  connected: number;
 }
 
 export interface ZoneSensors {
@@ -160,8 +190,10 @@ export interface ManagedUser {
   alert_emails: string[];
   device_id: number | null;
   group_id: number | null;
+  building_id: number | null;
   device_uuid: string | null;
   group_name: string | null;
+  building_name: string | null;
   assigned_device_ids: number[];
   assigned_device_uuids: string[];
 }
@@ -173,6 +205,7 @@ export interface CreateUserInput {
   role: string;
   device_id?: number | null;
   group_id?: number | null;
+  building_id?: number | null;
   first_name?: string;
   last_name?: string;
   mobile_no?: string;
@@ -189,6 +222,7 @@ export interface UpdateUserInput {
   email?: string;
   device_id?: number | null;
   group_id?: number | null;
+  building_id?: number | null;
   first_name?: string;
   last_name?: string;
   mobile_no?: string;
