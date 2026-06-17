@@ -37,6 +37,7 @@ export interface AuthUser {
   device_id?: number | null;
   group_id?: number | null;
   building_id?: number | null;
+  location_id?: number | null;
   organization_id?: number | null;
   hierarchy_level?: number | null;
   first_name?: string | null;
@@ -50,6 +51,7 @@ export interface TokenPayload {
   device_id: number | null;
   group_id: number | null;
   building_id: number | null;
+  location_id: number | null;
   organization_id: number | null;
   hierarchy_level: number | null;
   exp: number;
@@ -191,9 +193,11 @@ export interface ManagedUser {
   device_id: number | null;
   group_id: number | null;
   building_id: number | null;
+  location_id: number | null;
   device_uuid: string | null;
   group_name: string | null;
   building_name: string | null;
+  location_name: string | null;
   assigned_device_ids: number[];
   assigned_device_uuids: string[];
 }
@@ -206,6 +210,7 @@ export interface CreateUserInput {
   device_id?: number | null;
   group_id?: number | null;
   building_id?: number | null;
+  location_id?: number | null;
   first_name?: string;
   last_name?: string;
   mobile_no?: string;
@@ -223,6 +228,7 @@ export interface UpdateUserInput {
   device_id?: number | null;
   group_id?: number | null;
   building_id?: number | null;
+  location_id?: number | null;
   first_name?: string;
   last_name?: string;
   mobile_no?: string;

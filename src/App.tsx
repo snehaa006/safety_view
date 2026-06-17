@@ -17,6 +17,7 @@ import GroupsPage from '@/pages/GroupsPage';
 import LocationsPage from '@/pages/LocationsPage';
 import AuditLogPage from '@/pages/AuditLogPage';
 import SettingsPage from '@/pages/SettingsPage';
+import ProfilePage from '@/pages/ProfilePage';
 import DeviceDashboardPage, {
   DeviceOverview,
   DeviceFire,
@@ -45,6 +46,7 @@ export default function App() {
               </Route>
 
               <Route path="/settings" element={<SettingsPage />} />
+              <Route path="/profile" element={<ProfilePage />} />
 
               {/* Admin-only routes */}
               <Route element={<AdminRoute />}>

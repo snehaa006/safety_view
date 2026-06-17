@@ -78,7 +78,7 @@ export async function login(username: string, password: string): Promise<LoginRe
   let profile: Record<string, unknown> = {};
   const { data: profileRow } = await supabase
     .from('users')
-    .select('id, username, email, role, device_id, group_id, building_id, organization_id, hierarchy_level, first_name, last_name')
+    .select('id, username, email, role, device_id, group_id, building_id, location_id, organization_id, hierarchy_level, first_name, last_name')
     .eq('id', accId)
     .single();
   if (profileRow) profile = profileRow;
@@ -91,6 +91,7 @@ export async function login(username: string, password: string): Promise<LoginRe
     device_id: (profile.device_id as number | null) ?? null,
     group_id: (profile.group_id as number | null) ?? null,
     building_id: (profile.building_id as number | null) ?? null,
+    location_id: (profile.location_id as number | null) ?? null,
     organization_id: (profile.organization_id as number | null) ?? null,
     hierarchy_level: (accHier ?? profile.hierarchy_level ?? null) as number | null,
     first_name: (profile.first_name as string | null) ?? null,
@@ -104,6 +105,7 @@ export async function login(username: string, password: string): Promise<LoginRe
     device_id: user.device_id ?? null,
     group_id: user.group_id ?? null,
     building_id: user.building_id ?? null,
+    location_id: user.location_id ?? null,
     organization_id: user.organization_id ?? null,
     hierarchy_level: user.hierarchy_level ?? null,
     exp: Date.now() + 8 * 60 * 60 * 1000,
@@ -146,31 +148,93 @@ export async function fetchGroups(): Promise<Group[]> {
 
 // ---------------------------------------------------------------------------
 // Hierarchy: which buildings a user can see ("downward visibility").
-//   • SUPER_ADMIN / ADMIN → null (all)
-//   • NATIONAL/REGIONAL/DISTRICT MANAGER → buildings whose matching
-//     manager column references them
-//   • SUPERVISOR → buildings they supervise
+//
+// Managers are assigned to a LOCATION (users.location_id). They automatically
+// see every building whose location is at or below their location in the
+// Country → State → District tree — no manual per-building assignment.
+//   • SUPER_ADMIN / ADMIN  → null (all)
+//   • NATIONAL/REGIONAL/DISTRICT MANAGER → buildings in their location subtree
+//   • SUPERVISOR           → buildings they supervise (buildings.supervisor_id)
 //   • BUILDING_OPERATOR / others → their single assigned building
 // ---------------------------------------------------------------------------
 
-const ROLE_BUILDING_COLUMN: Record<string, string> = {
-  NATIONAL_MANAGER: 'national_manager_id',
-  REGIONAL_MANAGER: 'regional_manager_id',
-  DISTRICT_MANAGER: 'district_manager_id',
-  SUPERVISOR: 'supervisor_id',
-};
+const MANAGER_ROLES = new Set(['NATIONAL_MANAGER', 'REGIONAL_MANAGER', 'DISTRICT_MANAGER']);
+
+// All location ids at or below `rootId` (inclusive) in the parent_id tree.
+async function locationSubtreeIds(rootId: number): Promise<number[]> {
+  const { data } = await supabase.from('locations').select('id, parent_id');
+  const all = (data ?? []) as { id: number; parent_id: number | null }[];
+  const childrenOf: Record<number, number[]> = {};
+  for (const l of all) {
+    if (l.parent_id != null) (childrenOf[l.parent_id] ??= []).push(l.id);
+  }
+  const result: number[] = [];
+  const stack = [rootId];
+  while (stack.length) {
+    const cur = stack.pop()!;
+    result.push(cur);
+    for (const c of childrenOf[cur] ?? []) stack.push(c);
+  }
+  return result;
+}
 
 export async function visibleBuildingIds(user: AuthUser | null): Promise<number[] | null> {
   if (isAdmin(user?.role)) return null; // all buildings
   const role = (user?.role || '').toUpperCase();
-  const col = ROLE_BUILDING_COLUMN[role];
-  if (col && user?.id != null) {
-    const { data, error } = await supabase.from('buildings').select('id').eq(col, user.id);
+
+  if (MANAGER_ROLES.has(role)) {
+    if (user?.location_id == null) return [];
+    const locIds = await locationSubtreeIds(user.location_id);
+    if (locIds.length === 0) return [];
+    const { data, error } = await supabase.from('buildings').select('id').in('location_id', locIds);
     if (error) return [];
     return (data ?? []).map((r) => r.id);
   }
+
+  if (role === 'SUPERVISOR' && user?.id != null) {
+    const { data } = await supabase.from('buildings').select('id').eq('supervisor_id', user.id);
+    return (data ?? []).map((r) => r.id);
+  }
+
   if (user?.building_id != null) return [user.building_id];
   return [];
+}
+
+// Find an existing location (by name + type + parent) or create it. Used by the
+// building form so a new Country/State/District is auto-added to `locations`.
+export async function resolveLocation(
+  name: string,
+  type: 'NATIONAL' | 'REGIONAL' | 'DISTRICT',
+  parentId: number | null
+): Promise<number | null> {
+  const clean = name.trim();
+  if (!clean) return null;
+  let q = supabase.from('locations').select('id').ilike('name', clean).eq('type', type);
+  q = parentId == null ? q.is('parent_id', null) : q.eq('parent_id', parentId);
+  const { data: existing } = await q.maybeSingle();
+  if (existing) return (existing as any).id;
+  const { data, error } = await supabase
+    .from('locations')
+    .insert({ name: clean, type, parent_id: parentId })
+    .select('id')
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return (data as any)?.id ?? null;
+}
+
+// Resolve a full Country → State → District path, creating missing nodes.
+// Returns the District location id (the one a building points at).
+export async function resolveLocationPath(input: {
+  country: string;
+  state: string;
+  district: string;
+}): Promise<number | null> {
+  const countryId = await resolveLocation(input.country, 'NATIONAL', null);
+  if (countryId == null) return null;
+  const stateId = await resolveLocation(input.state, 'REGIONAL', countryId);
+  if (stateId == null) return countryId;
+  const districtId = await resolveLocation(input.district, 'DISTRICT', stateId);
+  return districtId ?? stateId;
 }
 
 // ---------------------------------------------------------------------------
@@ -720,7 +784,7 @@ const USER_SELECT = `
   first_name, last_name, mobile_no, customer_id, org_name,
   organization_id, hierarchy_level, parent_user_id, device_type,
   remarks, alert_email_enabled,
-  device_id, group_id, building_id,
+  device_id, group_id, building_id, location_id,
   devices!device_id ( device_uuid ),
   groups ( group_name ),
   organizations ( organization_name, logo_path )
@@ -730,7 +794,8 @@ function normaliseUser(
   u: any,
   assigned: { id: number; uuid: string | null }[],
   alertEmails: string[] = [],
-  buildingName: string | null = null
+  buildingName: string | null = null,
+  locationName: string | null = null
 ): ManagedUser {
   return {
     id: u.id,
@@ -758,9 +823,11 @@ function normaliseUser(
     device_id: u.device_id ?? null,
     group_id: u.group_id ?? null,
     building_id: u.building_id ?? null,
+    location_id: u.location_id ?? null,
     device_uuid: u.devices?.device_uuid ?? null,
     group_name: u.groups?.group_name ?? null,
     building_name: buildingName,
+    location_name: locationName,
     assigned_device_ids: assigned.map((d) => d.id),
     assigned_device_uuids: assigned.map((d) => d.uuid).filter((x): x is string => !!x),
   };
@@ -782,6 +849,13 @@ async function buildingNameMap(): Promise<Record<number, string>> {
   return map;
 }
 
+async function locationNameMap(): Promise<Record<number, string>> {
+  const map: Record<number, string> = {};
+  const { data } = await supabase.from('locations').select('id, name');
+  for (const r of (data ?? []) as any[]) map[r.id] = r.name;
+  return map;
+}
+
 export async function fetchUsers(): Promise<ManagedUser[]> {
   const { data, error } = await supabase
     .from('users')
@@ -800,9 +874,16 @@ export async function fetchUsers(): Promise<ManagedUser[]> {
 
   const emails = await alertEmailsByUser();
   const bNames = await buildingNameMap();
+  const lNames = await locationNameMap();
 
   return ((data ?? []) as any[]).map((u) =>
-    normaliseUser(u, byUser[u.id] ?? [], emails[u.id] ?? [], u.building_id ? bNames[u.building_id] ?? null : null)
+    normaliseUser(
+      u,
+      byUser[u.id] ?? [],
+      emails[u.id] ?? [],
+      u.building_id ? bNames[u.building_id] ?? null : null,
+      u.location_id ? lNames[u.location_id] ?? null : null
+    )
   );
 }
 
@@ -839,7 +920,17 @@ export async function fetchUserById(userId: number): Promise<ManagedUser | null>
     buildingName = (b as any)?.building_name ?? null;
   }
 
-  return normaliseUser(data, assigned, alertEmails, buildingName);
+  let locationName: string | null = null;
+  if ((data as any).location_id) {
+    const { data: l } = await supabase
+      .from('locations')
+      .select('name')
+      .eq('id', (data as any).location_id)
+      .maybeSingle();
+    locationName = (l as any)?.name ?? null;
+  }
+
+  return normaliseUser(data, assigned, alertEmails, buildingName, locationName);
 }
 
 export async function createUser(input: CreateUserInput): Promise<{ id: number | undefined; username: string }> {
@@ -867,19 +958,14 @@ export async function createUser(input: CreateUserInput): Promise<{ id: number |
   const newId = (row as any)?.id as number | undefined;
 
   // The RPC doesn't accept organization_id / remarks / alert flag — patch after.
-  if (
-    newId != null &&
-    (input.organization_id !== undefined ||
-      input.remarks !== undefined ||
-      input.alert_email_enabled !== undefined ||
-      input.building_id !== undefined)
-  ) {
+  if (newId != null) {
     const patch: Record<string, unknown> = {};
     if (input.organization_id !== undefined) patch.organization_id = input.organization_id || null;
     if (input.remarks !== undefined) patch.remarks = input.remarks || null;
     if (input.alert_email_enabled !== undefined) patch.alert_email_enabled = input.alert_email_enabled;
     if (input.building_id !== undefined) patch.building_id = input.building_id || null;
-    await supabase.from('users').update(patch).eq('id', newId);
+    if (input.location_id !== undefined) patch.location_id = input.location_id || null;
+    if (Object.keys(patch).length > 0) await supabase.from('users').update(patch).eq('id', newId);
   }
 
   return { id: newId, username: input.username };
@@ -899,6 +985,7 @@ export async function updateUser(userId: number, fields: UpdateUserInput): Promi
   if (fields.device_type !== undefined) patch.device_type = fields.device_type || null;
   if (fields.alert_email_enabled !== undefined) patch.alert_email_enabled = fields.alert_email_enabled;
   if (fields.building_id !== undefined) patch.building_id = fields.building_id || null;
+  if (fields.location_id !== undefined) patch.location_id = fields.location_id || null;
 
   const { data, error } = await supabase
     .from('users')

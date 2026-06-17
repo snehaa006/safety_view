@@ -6,6 +6,7 @@ import {
   fetchDevices,
   fetchOrganizations,
   fetchBuildings,
+  fetchLocations,
   fetchUserById,
   createUser,
   updateUser,
@@ -27,7 +28,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { ROLE_OPTIONS, type Building, type Device, type Group, type Organization, type TodoItem } from '@/types';
+import { ROLE_OPTIONS, type Building, type Device, type Group, type Location, type Organization, type TodoItem } from '@/types';
+
+const ROLE_LOCATION_TYPE: Record<string, 'NATIONAL' | 'REGIONAL' | 'DISTRICT'> = {
+  NATIONAL_MANAGER: 'NATIONAL',
+  REGIONAL_MANAGER: 'REGIONAL',
+  DISTRICT_MANAGER: 'DISTRICT',
+};
 
 interface FormState {
   username: string;
@@ -41,6 +48,7 @@ interface FormState {
   group_id: string;
   organization_id: string;
   building_id: string;
+  location_id: string;
   device_type: string;
   customer_id: string;
   alert_email_enabled: boolean;
@@ -63,6 +71,7 @@ const EMPTY: FormState = {
   group_id: '',
   organization_id: '',
   building_id: '',
+  location_id: '',
   device_type: '',
   customer_id: '',
   alert_email_enabled: false,
@@ -81,6 +90,7 @@ export default function UserFormPage() {
   const [orgs, setOrgs] = useState<Organization[]>([]);
   const [devices, setDevices] = useState<Device[]>([]);
   const [buildings, setBuildings] = useState<Building[]>([]);
+  const [locations, setLocations] = useState<Location[]>([]);
   const [form, setForm] = useState<FormState>(EMPTY);
   const initialRef = useRef<string>(JSON.stringify(EMPTY));
   const [loading, setLoading] = useState(true);
@@ -91,16 +101,18 @@ export default function UserFormPage() {
   useEffect(() => {
     (async () => {
       try {
-        const [g, o, d, b] = await Promise.all([
+        const [g, o, d, b, l] = await Promise.all([
           fetchGroups(),
           fetchOrganizations().catch(() => []),
           fetchDevices(currentUser),
           fetchBuildings(currentUser).catch(() => []),
+          fetchLocations().catch(() => []),
         ]);
         setGroups(g);
         setOrgs(o);
         setDevices(d);
         setBuildings(b);
+        setLocations(l);
 
         let next: FormState;
         if (isEditing) {
@@ -118,6 +130,7 @@ export default function UserFormPage() {
                 group_id: u.group_id ? String(u.group_id) : '',
                 organization_id: u.organization_id ? String(u.organization_id) : '',
                 building_id: u.building_id ? String(u.building_id) : '',
+                location_id: u.location_id ? String(u.location_id) : '',
                 device_type: u.device_type || '',
                 customer_id: u.customer_id || '',
                 alert_email_enabled: !!u.alert_email_enabled,
@@ -215,6 +228,7 @@ export default function UserFormPage() {
     const groupId = form.group_id ? Number(form.group_id) : null;
     const orgId = form.organization_id ? Number(form.organization_id) : null;
     const buildingId = form.building_id ? Number(form.building_id) : null;
+    const locationId = form.location_id ? Number(form.location_id) : null;
     const remarks = serializeTodos(form.todos);
 
     try {
@@ -232,6 +246,7 @@ export default function UserFormPage() {
           device_id: primaryDevice,
           organization_id: orgId,
           building_id: buildingId,
+          location_id: locationId,
           device_type: form.device_type.trim(),
           alert_email_enabled: form.alert_email_enabled,
           remarks,
@@ -249,6 +264,7 @@ export default function UserFormPage() {
           device_id: primaryDevice,
           organization_id: orgId,
           building_id: buildingId,
+          location_id: locationId,
           customer_id: form.customer_id || null,
           device_type: form.device_type.trim() || null,
           alert_email_enabled: form.alert_email_enabled,
@@ -334,17 +350,34 @@ export default function UserFormPage() {
               </SelectContent>
             </Select>
           </Field>
-          <Field label="Building (for building operators)">
-            <Select value={form.building_id || 'none'} onValueChange={(v) => update('building_id', v === 'none' ? '' : v)}>
-              <SelectTrigger><SelectValue placeholder="No building" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">— No building —</SelectItem>
-                {buildings.map((b) => (
-                  <SelectItem key={b.id} value={String(b.id)}>{b.building_name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </Field>
+          {ROLE_LOCATION_TYPE[form.role] && (
+            <Field label={`Managed Location (${ROLE_LOCATION_TYPE[form.role]})`}>
+              <Select value={form.location_id || 'none'} onValueChange={(v) => update('location_id', v === 'none' ? '' : v)}>
+                <SelectTrigger><SelectValue placeholder="No location" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">— No location —</SelectItem>
+                  {locations
+                    .filter((l) => l.type === ROLE_LOCATION_TYPE[form.role])
+                    .map((l) => (
+                      <SelectItem key={l.id} value={String(l.id)}>{l.name}</SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            </Field>
+          )}
+          {form.role === 'BUILDING_OPERATOR' && (
+            <Field label="Building (operator's building)">
+              <Select value={form.building_id || 'none'} onValueChange={(v) => update('building_id', v === 'none' ? '' : v)}>
+                <SelectTrigger><SelectValue placeholder="No building" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">— No building —</SelectItem>
+                  {buildings.map((b) => (
+                    <SelectItem key={b.id} value={String(b.id)}>{b.building_name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+          )}
           <Field label="User ID (auto)">
             <Input value={form.customer_id} readOnly className="font-mono text-xs" />
           </Field>

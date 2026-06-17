@@ -86,6 +86,8 @@ export default function UserDetailPage() {
           <Row label="Hierarchy Level" value={user.hierarchy_level} />
           <Row label="Reports To (user id)" value={user.parent_user_id} />
           <Row label="Group" value={user.group_name} />
+          <Row label="Building" value={user.building_name} />
+          <Row label="Managed Location" value={user.location_name} />
           <Row label="Organization" value={user.organization_name || user.org_name} />
           <Row label="Device Type" value={user.device_type} />
           <Row label="Primary Device" value={user.device_uuid} />
