@@ -9,6 +9,9 @@ import DeviceManagementPage from '@/pages/DeviceManagementPage';
 import UserManagementPage from '@/pages/UserManagementPage';
 import UserFormPage from '@/pages/UserFormPage';
 import UserDetailPage from '@/pages/UserDetailPage';
+import OrganizationsPage from '@/pages/OrganizationsPage';
+import GroupsPage from '@/pages/GroupsPage';
+import SettingsPage from '@/pages/SettingsPage';
 import DeviceDashboardPage, {
   DeviceOverview,
   DeviceFire,
@@ -34,9 +37,13 @@ export default function App() {
                 <Route path="events" element={<DeviceEvents />} />
               </Route>
 
+              <Route path="/settings" element={<SettingsPage />} />
+
               {/* Admin-only routes */}
               <Route element={<AdminRoute />}>
                 <Route path="/device-management" element={<DeviceManagementPage />} />
+                <Route path="/organizations" element={<OrganizationsPage />} />
+                <Route path="/groups" element={<GroupsPage />} />
                 <Route path="/users" element={<UserManagementPage />} />
                 <Route path="/users/new" element={<UserFormPage />} />
                 <Route path="/users/:id" element={<UserDetailPage />} />

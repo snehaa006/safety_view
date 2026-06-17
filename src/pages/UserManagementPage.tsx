@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Search } from 'lucide-react';
+import { Plus, Search, X } from 'lucide-react';
 import { fetchUsers, fetchGroups, toggleUserActive, deleteUser } from '@/services/api';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -31,10 +31,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import Highlight from '@/components/common/Highlight';
 import { formatDate } from '@/utils/format';
-import type { Group, ManagedUser, Role } from '@/types';
-
-const ROLES: Role[] = ['ADMIN', 'FIRE_OFFICER', 'BUILDING_MANAGER', 'VIEWER'];
+import { ROLE_OPTIONS, type Group, type ManagedUser } from '@/types';
 
 const SEARCH_FIELDS = [
   { value: 'all', label: 'All fields' },
@@ -44,12 +43,25 @@ const SEARCH_FIELDS = [
   { value: 'mobile_no', label: 'Mobile' },
   { value: 'name', label: 'Name' },
   { value: 'group_name', label: 'Group' },
+  { value: 'organization_name', label: 'Organization' },
+  { value: 'customer_id', label: 'User ID' },
 ] as const;
 
 function roleBadgeVariant(role: string): 'destructive' | 'water' | 'off' {
-  if (role === 'ADMIN') return 'destructive';
-  if (role === 'FIRE_OFFICER' || role === 'BUILDING_MANAGER') return 'water';
-  return 'off';
+  if (role === 'SUPER_ADMIN' || role === 'ADMIN') return 'destructive';
+  if (role === 'VIEWER') return 'off';
+  return 'water';
+}
+
+function fmtDateTime(iso: string | null): string {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 }
 
 export default function UserManagementPage() {
@@ -59,14 +71,12 @@ export default function UserManagementPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  // search + filters
   const [query, setQuery] = useState('');
   const [searchField, setSearchField] = useState<string>('all');
   const [roleFilter, setRoleFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [groupFilter, setGroupFilter] = useState<string>('all');
 
-  // delete (double verification)
   const [deleteTarget, setDeleteTarget] = useState<ManagedUser | null>(null);
   const [confirmName, setConfirmName] = useState('');
   const [confirmAck, setConfirmAck] = useState(false);
@@ -89,6 +99,34 @@ export default function UserManagementPage() {
     }
   }
 
+  const filtersActive =
+    query.trim() !== '' ||
+    searchField !== 'all' ||
+    roleFilter !== 'all' ||
+    statusFilter !== 'all' ||
+    groupFilter !== 'all';
+
+  function clearFilters() {
+    setQuery('');
+    setSearchField('all');
+    setRoleFilter('all');
+    setStatusFilter('all');
+    setGroupFilter('all');
+  }
+
+  function fieldsOf(u: ManagedUser): Record<string, string> {
+    return {
+      username: u.username ?? '',
+      email: u.email ?? '',
+      role: u.role ?? '',
+      mobile_no: u.mobile_no ?? '',
+      name: `${u.first_name ?? ''} ${u.last_name ?? ''}`.trim(),
+      group_name: u.group_name ?? '',
+      organization_name: u.organization_name ?? '',
+      customer_id: u.customer_id ?? '',
+    };
+  }
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return users.filter((u) => {
@@ -96,22 +134,19 @@ export default function UserManagementPage() {
       if (statusFilter === 'active' && !u.is_active) return false;
       if (statusFilter === 'inactive' && u.is_active) return false;
       if (groupFilter !== 'all' && String(u.group_id ?? '') !== groupFilter) return false;
-
       if (!q) return true;
-      const fields: Record<string, string> = {
-        username: u.username ?? '',
-        email: u.email ?? '',
-        role: u.role ?? '',
-        mobile_no: u.mobile_no ?? '',
-        name: `${u.first_name ?? ''} ${u.last_name ?? ''}`,
-        group_name: u.group_name ?? '',
-      };
-      if (searchField === 'all') {
-        return Object.values(fields).some((v) => v.toLowerCase().includes(q));
-      }
-      return (fields[searchField] ?? '').toLowerCase().includes(q);
+      const f = fieldsOf(u);
+      if (searchField === 'all') return Object.values(f).some((v) => v.toLowerCase().includes(q));
+      return (f[searchField] ?? '').toLowerCase().includes(q);
     });
   }, [users, query, searchField, roleFilter, statusFilter, groupFilter]);
+
+  // Which cells to highlight: only the searched field (or all when 'all').
+  function hq(field: string): string {
+    if (!query.trim()) return '';
+    if (searchField === 'all' || searchField === field) return query;
+    return '';
+  }
 
   async function handleToggleActive(u: ManagedUser) {
     try {
@@ -150,7 +185,7 @@ export default function UserManagementPage() {
         <div>
           <h3 className="text-lg font-bold">User Management</h3>
           <p className="text-sm text-muted-foreground">
-            Search, filter and manage users, roles and device assignments
+            Search, filter and manage users, roles, organizations and device assignments
           </p>
         </div>
         <Button onClick={() => navigate('/users/new')}>
@@ -162,7 +197,6 @@ export default function UserManagementPage() {
         <div className="rounded-md border border-crit-border bg-crit-bg px-4 py-2 text-sm text-crit-text">{error}</div>
       )}
 
-      {/* Search + filters */}
       <Card className="p-4">
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-5">
           <div className="relative lg:col-span-2">
@@ -186,7 +220,7 @@ export default function UserManagementPage() {
             <SelectTrigger><SelectValue placeholder="Role" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All roles</SelectItem>
-              {ROLES.map((r) => (
+              {ROLE_OPTIONS.map((r) => (
                 <SelectItem key={r} value={r}>{r.replace(/_/g, ' ')}</SelectItem>
               ))}
             </SelectContent>
@@ -210,6 +244,9 @@ export default function UserManagementPage() {
               ))}
             </SelectContent>
           </Select>
+          <Button variant="outline" size="sm" onClick={clearFilters} disabled={!filtersActive}>
+            <X className="h-4 w-4" /> Clear filters
+          </Button>
           <span className="text-xs text-muted-foreground">
             {filtered.length} of {users.length} users
           </span>
@@ -223,11 +260,18 @@ export default function UserManagementPage() {
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead>ID</TableHead>
+                <TableHead>User ID</TableHead>
                 <TableHead>Username</TableHead>
+                <TableHead>Name</TableHead>
                 <TableHead>Email</TableHead>
+                <TableHead>Mobile</TableHead>
                 <TableHead>Role</TableHead>
-                <TableHead>Devices</TableHead>
+                <TableHead>Level</TableHead>
                 <TableHead>Group</TableHead>
+                <TableHead>Organization</TableHead>
+                <TableHead>Devices</TableHead>
+                <TableHead>Last Login</TableHead>
                 <TableHead>Created</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
@@ -240,39 +284,51 @@ export default function UserManagementPage() {
                   : u.device_uuid
                   ? [u.device_uuid]
                   : [];
+                const name = `${u.first_name ?? ''} ${u.last_name ?? ''}`.trim();
                 return (
-                  <TableRow key={u.id} className={!u.is_active ? 'opacity-60' : ''}>
-                    <TableCell>
-                      <div className="flex items-center gap-2 font-semibold">
-                        <span className="flex h-7 w-7 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground">
-                          {u.username.charAt(0).toUpperCase()}
-                        </span>
-                        {u.username}
-                      </div>
+                  <TableRow
+                    key={u.id}
+                    className={`cursor-pointer ${!u.is_active ? 'opacity-60' : ''}`}
+                    onClick={() => navigate(`/users/${u.id}`)}
+                  >
+                    <TableCell className="text-muted-foreground">{u.id}</TableCell>
+                    <TableCell className="font-mono text-xs text-muted-foreground">
+                      <Highlight text={u.customer_id || '—'} query={hq('customer_id')} />
                     </TableCell>
-                    <TableCell className="text-muted-foreground">{u.email || '—'}</TableCell>
+                    <TableCell className="font-semibold">
+                      <Highlight text={u.username} query={hq('username')} />
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap">
+                      <Highlight text={name || '—'} query={hq('name')} />
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      <Highlight text={u.email || '—'} query={hq('email')} />
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      <Highlight text={u.mobile_no || '—'} query={hq('mobile_no')} />
+                    </TableCell>
                     <TableCell>
                       <Badge variant={roleBadgeVariant(u.role)}>{String(u.role).replace(/_/g, ' ')}</Badge>
                     </TableCell>
-                    <TableCell className="text-muted-foreground" title={deviceUuids.join(', ')}>
-                      {deviceUuids.length === 0
-                        ? '—'
-                        : deviceUuids.length === 1
-                        ? deviceUuids[0]
-                        : `${deviceUuids.length} devices`}
+                    <TableCell className="text-muted-foreground">{u.hierarchy_level ?? '—'}</TableCell>
+                    <TableCell className="whitespace-nowrap text-muted-foreground">
+                      <Highlight text={u.group_name || '—'} query={hq('group_name')} />
                     </TableCell>
-                    <TableCell className="text-muted-foreground">{u.group_name || '—'}</TableCell>
-                    <TableCell className="text-muted-foreground">{formatDate(u.created_at)}</TableCell>
+                    <TableCell className="whitespace-nowrap text-muted-foreground">
+                      <Highlight text={u.organization_name || u.org_name || '—'} query={hq('organization_name')} />
+                    </TableCell>
+                    <TableCell className="text-muted-foreground" title={deviceUuids.join(', ')}>
+                      {deviceUuids.length === 0 ? '—' : deviceUuids.length === 1 ? deviceUuids[0] : `${deviceUuids.length} devices`}
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap text-muted-foreground">{fmtDateTime(u.last_login)}</TableCell>
+                    <TableCell className="whitespace-nowrap text-muted-foreground">{formatDate(u.created_at)}</TableCell>
                     <TableCell>
                       <span className={u.is_active ? 'text-ok-text' : 'text-muted-foreground'}>
                         {u.is_active ? 'Active' : 'Inactive'}
                       </span>
                     </TableCell>
-                    <TableCell>
+                    <TableCell onClick={(e) => e.stopPropagation()}>
                       <div className="flex justify-end gap-2">
-                        <Button variant="ghost" size="sm" onClick={() => navigate(`/users/${u.id}`)}>
-                          View
-                        </Button>
                         <Button variant="outline" size="sm" onClick={() => navigate(`/users/${u.id}/edit`)}>
                           Edit
                         </Button>
@@ -289,7 +345,7 @@ export default function UserManagementPage() {
               })}
               {filtered.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={8} className="py-6 text-center text-muted-foreground">
+                  <TableCell colSpan={15} className="py-6 text-center text-muted-foreground">
                     No users match your search.
                   </TableCell>
                 </TableRow>
@@ -299,7 +355,6 @@ export default function UserManagementPage() {
         )}
       </Card>
 
-      {/* Delete with double verification */}
       <Dialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
         <DialogContent>
           <DialogHeader>
@@ -309,7 +364,6 @@ export default function UserManagementPage() {
               assignments. This cannot be undone.
             </DialogDescription>
           </DialogHeader>
-
           <div className="space-y-3">
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="confirm-name">
@@ -328,11 +382,8 @@ export default function UserManagementPage() {
               I understand this action is permanent.
             </label>
           </div>
-
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteTarget(null)}>
-              Cancel
-            </Button>
+            <Button variant="outline" onClick={() => setDeleteTarget(null)}>Cancel</Button>
             <Button variant="destructive" disabled={!canDelete || deleting} onClick={confirmDelete}>
               {deleting ? 'Deleting…' : 'Delete user'}
             </Button>

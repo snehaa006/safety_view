@@ -223,6 +223,7 @@ export default function DeviceManagementPage() {
                 <TableHead>Remarks</TableHead>
                 <TableHead>Group</TableHead>
                 <TableHead>Status</TableHead>
+                <TableHead>Health</TableHead>
                 <TableHead>Zones</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
@@ -236,6 +237,21 @@ export default function DeviceManagementPage() {
                   <TableCell>
                     <Badge variant={d.status === 'ASSIGNED' ? 'ok' : 'off'}>
                       {d.status === 'ASSIGNED' ? 'Assigned' : 'Not assigned'}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>
+                    <Badge
+                      variant={
+                        d.health_status === 'FAULT'
+                          ? 'destructive'
+                          : d.health_status === 'OFFLINE'
+                          ? 'off'
+                          : d.health_status === 'CONNECTED'
+                          ? 'water'
+                          : 'ok'
+                      }
+                    >
+                      {d.health_status || 'HEALTHY'}
                     </Badge>
                   </TableCell>
                   <TableCell className="text-muted-foreground">{d.summary?.totalZones ?? 0}</TableCell>
@@ -253,7 +269,7 @@ export default function DeviceManagementPage() {
               ))}
               {devices.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={6} className="py-6 text-center text-muted-foreground">
+                  <TableCell colSpan={7} className="py-6 text-center text-muted-foreground">
                     No devices found.
                   </TableCell>
                 </TableRow>

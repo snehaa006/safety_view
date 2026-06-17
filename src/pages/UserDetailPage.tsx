@@ -75,21 +75,25 @@ export default function UserDetailPage() {
 
         <div>
           <Row label="ID" value={user.id} />
+          <Row label="User ID" value={user.customer_id} />
           <Row label="Username" value={user.username} />
           <Row label="Email" value={user.email} />
           <Row label="First Name" value={user.first_name} />
           <Row label="Last Name" value={user.last_name} />
           <Row label="Mobile No." value={user.mobile_no} />
           <Row label="Role" value={String(user.role).replace(/_/g, ' ')} />
+          <Row label="Hierarchy Level" value={user.hierarchy_level} />
+          <Row label="Reports To (user id)" value={user.parent_user_id} />
           <Row label="Group" value={user.group_name} />
+          <Row label="Organization" value={user.organization_name || user.org_name} />
+          <Row label="Device Type" value={user.device_type} />
           <Row label="Primary Device" value={user.device_uuid} />
-          <Row
-            label="Assigned Devices"
-            value={devices.length ? devices.join(', ') : '—'}
-          />
-          <Row label="Organisation" value={user.org_name} />
+          <Row label="Assigned Devices" value={devices.length ? devices.join(', ') : '—'} />
+          <Row label="Alert Email" value={user.alert_email_enabled ? 'Enabled' : 'Disabled'} />
           <Row label="Active" value={user.is_active ? 'Yes' : 'No'} />
+          <Row label="Last Login" value={user.last_login ? new Date(user.last_login).toLocaleString() : '—'} />
           <Row label="Created" value={formatDate(user.created_at)} />
+          <Row label="Notes" value={user.remarks} />
         </div>
       </Card>
     </section>
