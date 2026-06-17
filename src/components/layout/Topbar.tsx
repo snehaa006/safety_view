@@ -15,6 +15,7 @@ function titleForPath(pathname: string): string {
   if (matchPath('/locations', pathname)) return 'Locations';
   if (matchPath('/audit-log', pathname)) return 'Audit Log';
   if (matchPath('/settings', pathname)) return 'Settings';
+  if (matchPath('/profile', pathname)) return 'My Profile';
   if (matchPath('/users/new', pathname)) return 'New User';
   if (matchPath('/users/:id/edit', pathname)) return 'Edit User';
   if (matchPath('/users/:id', pathname)) return 'User Details';

@@ -35,6 +35,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           device_id: payload.device_id ?? null,
           group_id: payload.group_id ?? null,
           building_id: payload.building_id ?? null,
+          location_id: payload.location_id ?? null,
           organization_id: payload.organization_id ?? null,
           hierarchy_level: payload.hierarchy_level ?? null,
         });

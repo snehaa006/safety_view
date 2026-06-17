@@ -7,6 +7,7 @@ import {
   createBuilding,
   updateBuilding,
   deleteBuilding,
+  resolveLocationPath,
 } from '@/services/api';
 import { useAuth } from '@/context/AuthContext';
 import { Card } from '@/components/ui/card';
@@ -41,20 +42,18 @@ import type { Building, Location, ManagedUser } from '@/types';
 interface FormState {
   building_name: string;
   address: string;
-  location_id: string;
-  national_manager_id: string;
-  regional_manager_id: string;
-  district_manager_id: string;
+  country: string;
+  state: string;
+  district: string;
   supervisor_id: string;
 }
 
 const EMPTY: FormState = {
   building_name: '',
   address: '',
-  location_id: '',
-  national_manager_id: '',
-  regional_manager_id: '',
-  district_manager_id: '',
+  country: '',
+  state: '',
+  district: '',
   supervisor_id: '',
 };
 
@@ -94,15 +93,28 @@ export default function BuildingManagementPage() {
     }
   }
 
-  const byRole = useMemo(() => {
-    const f = (role: string) => users.filter((u) => u.role === role);
-    return {
-      national: f('NATIONAL_MANAGER'),
-      regional: f('REGIONAL_MANAGER'),
-      district: f('DISTRICT_MANAGER'),
-      supervisor: f('SUPERVISOR'),
-    };
-  }, [users]);
+  const locById = useMemo(() => {
+    const m: Record<number, Location> = {};
+    for (const l of locations) m[l.id] = l;
+    return m;
+  }, [locations]);
+
+  const supervisors = useMemo(() => users.filter((u) => u.role === 'SUPERVISOR'), [users]);
+  const countries = useMemo(() => locations.filter((l) => l.type === 'NATIONAL').map((l) => l.name), [locations]);
+  const states = useMemo(() => locations.filter((l) => l.type === 'REGIONAL').map((l) => l.name), [locations]);
+  const districts = useMemo(() => locations.filter((l) => l.type === 'DISTRICT').map((l) => l.name), [locations]);
+
+  function pathOf(districtId: number | null): { country: string; state: string; district: string } {
+    let country = '', state = '', district = '';
+    let cur = districtId != null ? locById[districtId] : undefined;
+    while (cur) {
+      if (cur.type === 'DISTRICT') district = cur.name;
+      else if (cur.type === 'REGIONAL') state = cur.name;
+      else if (cur.type === 'NATIONAL') country = cur.name;
+      cur = cur.parent_id != null ? locById[cur.parent_id] : undefined;
+    }
+    return { country, state, district };
+  }
 
   function userName(id: number | null) {
     const u = users.find((x) => x.id === id);
@@ -118,14 +130,14 @@ export default function BuildingManagementPage() {
   }
 
   function openEdit(b: Building) {
+    const p = pathOf(b.location_id);
     setEditingId(b.id);
     setForm({
       building_name: b.building_name,
       address: b.address || '',
-      location_id: b.location_id ? String(b.location_id) : '',
-      national_manager_id: b.national_manager_id ? String(b.national_manager_id) : '',
-      regional_manager_id: b.regional_manager_id ? String(b.regional_manager_id) : '',
-      district_manager_id: b.district_manager_id ? String(b.district_manager_id) : '',
+      country: p.country,
+      state: p.state,
+      district: p.district,
       supervisor_id: b.supervisor_id ? String(b.supervisor_id) : '',
     });
     setFormError('');
@@ -133,23 +145,23 @@ export default function BuildingManagementPage() {
     setShowForm(true);
   }
 
-  function num(v: string) {
-    return v ? Number(v) : null;
-  }
-
   async function handleSubmit() {
     if (!form.building_name.trim()) return setFormError('Building name is required.');
-    const payload = {
-      building_name: form.building_name.trim(),
-      address: form.address.trim(),
-      location_id: num(form.location_id),
-      national_manager_id: num(form.national_manager_id),
-      regional_manager_id: num(form.regional_manager_id),
-      district_manager_id: num(form.district_manager_id),
-      supervisor_id: num(form.supervisor_id),
-    };
+    if (!form.country.trim() || !form.state.trim() || !form.district.trim())
+      return setFormError('Country, State and District are all required.');
     try {
       setSubmitting(true);
+      const locationId = await resolveLocationPath({
+        country: form.country.trim(),
+        state: form.state.trim(),
+        district: form.district.trim(),
+      });
+      const payload = {
+        building_name: form.building_name.trim(),
+        address: form.address.trim(),
+        location_id: locationId,
+        supervisor_id: form.supervisor_id ? Number(form.supervisor_id) : null,
+      };
       if (editingId) {
         await updateBuilding(editingId, payload);
         setSuccess('Building updated.');
@@ -179,32 +191,14 @@ export default function BuildingManagementPage() {
     }
   }
 
-  function UserSelect({ value, onChange, options, placeholder }: {
-    value: string;
-    onChange: (v: string) => void;
-    options: ManagedUser[];
-    placeholder: string;
-  }) {
-    return (
-      <Select value={value || 'none'} onValueChange={(v) => onChange(v === 'none' ? '' : v)}>
-        <SelectTrigger><SelectValue placeholder={placeholder} /></SelectTrigger>
-        <SelectContent>
-          <SelectItem value="none">— None —</SelectItem>
-          {options.map((u) => (
-            <SelectItem key={u.id} value={String(u.id)}>{u.username}</SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    );
-  }
-
   return (
     <section className="space-y-4">
       <div className="flex items-start justify-between gap-3">
         <div>
           <h3 className="text-lg font-bold">Building Management</h3>
           <p className="text-sm text-muted-foreground">
-            Create buildings, place them in a location and assign the management chain
+            Set a building's location (Country → State → District) and supervisor. Managers see it
+            automatically based on their location.
           </p>
         </div>
         <Button onClick={showForm ? () => setShowForm(false) : openCreate}>
@@ -218,6 +212,10 @@ export default function BuildingManagementPage() {
       {showForm && (
         <Card className="p-6">
           <h4 className="mb-4 font-semibold">{editingId ? 'Edit Building' : 'New Building'}</h4>
+          <datalist id="dl-countries">{countries.map((c) => <option key={c} value={c} />)}</datalist>
+          <datalist id="dl-states">{states.map((s) => <option key={s} value={s} />)}</datalist>
+          <datalist id="dl-districts">{districts.map((d) => <option key={d} value={d} />)}</datalist>
+
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="flex flex-col gap-1.5">
               <Label>Building Name</Label>
@@ -228,34 +226,33 @@ export default function BuildingManagementPage() {
               <Input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
             </div>
             <div className="flex flex-col gap-1.5">
-              <Label>Location (District)</Label>
-              <Select value={form.location_id || 'none'} onValueChange={(v) => setForm({ ...form, location_id: v === 'none' ? '' : v })}>
-                <SelectTrigger><SelectValue placeholder="No location" /></SelectTrigger>
+              <Label>Country</Label>
+              <Input list="dl-countries" value={form.country} onChange={(e) => setForm({ ...form, country: e.target.value })} placeholder="e.g. India" />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>State / Region</Label>
+              <Input list="dl-states" value={form.state} onChange={(e) => setForm({ ...form, state: e.target.value })} placeholder="e.g. Haryana" />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>District</Label>
+              <Input list="dl-districts" value={form.district} onChange={(e) => setForm({ ...form, district: e.target.value })} placeholder="e.g. Panipat" />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>Supervisor</Label>
+              <Select value={form.supervisor_id || 'none'} onValueChange={(v) => setForm({ ...form, supervisor_id: v === 'none' ? '' : v })}>
+                <SelectTrigger><SelectValue placeholder="No supervisor" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="none">— No location —</SelectItem>
-                  {locations.map((l) => (
-                    <SelectItem key={l.id} value={String(l.id)}>{l.name} ({l.type})</SelectItem>
+                  <SelectItem value="none">— No supervisor —</SelectItem>
+                  {supervisors.map((u) => (
+                    <SelectItem key={u.id} value={String(u.id)}>{u.username}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
-            <div className="flex flex-col gap-1.5">
-              <Label>Supervisor</Label>
-              <UserSelect value={form.supervisor_id} onChange={(v) => setForm({ ...form, supervisor_id: v })} options={byRole.supervisor} placeholder="No supervisor" />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label>District Manager</Label>
-              <UserSelect value={form.district_manager_id} onChange={(v) => setForm({ ...form, district_manager_id: v })} options={byRole.district} placeholder="No district manager" />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label>Regional Manager</Label>
-              <UserSelect value={form.regional_manager_id} onChange={(v) => setForm({ ...form, regional_manager_id: v })} options={byRole.regional} placeholder="No regional manager" />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label>National Manager</Label>
-              <UserSelect value={form.national_manager_id} onChange={(v) => setForm({ ...form, national_manager_id: v })} options={byRole.national} placeholder="No national manager" />
-            </div>
           </div>
+          <p className="mt-3 text-xs text-muted-foreground">
+            New Country/State/District values are added to Locations automatically; existing ones are reused.
+          </p>
           <div className="mt-4 flex items-center justify-end gap-3">
             {formError && <span className="text-sm font-medium text-crit-text">{formError}</span>}
             <Button onClick={handleSubmit} disabled={submitting}>
@@ -275,30 +272,32 @@ export default function BuildingManagementPage() {
                 <TableHead>Building</TableHead>
                 <TableHead>Location</TableHead>
                 <TableHead>Supervisor</TableHead>
-                <TableHead>District Mgr</TableHead>
                 <TableHead>Devices</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {buildings.map((b) => (
-                <TableRow key={b.id}>
-                  <TableCell className="font-semibold">{b.building_name}</TableCell>
-                  <TableCell className="text-muted-foreground">{b.location_name || '—'}</TableCell>
-                  <TableCell className="text-muted-foreground">{userName(b.supervisor_id)}</TableCell>
-                  <TableCell className="text-muted-foreground">{userName(b.district_manager_id)}</TableCell>
-                  <TableCell className="text-muted-foreground">{b.deviceCount}</TableCell>
-                  <TableCell>
-                    <div className="flex justify-end gap-2">
-                      <Button variant="outline" size="sm" onClick={() => openEdit(b)}>Edit</Button>
-                      <Button variant="destructive" size="sm" onClick={() => setDeleteTarget(b)}>Delete</Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
+              {buildings.map((b) => {
+                const p = pathOf(b.location_id);
+                const path = [p.country, p.state, p.district].filter(Boolean).join(' › ') || '—';
+                return (
+                  <TableRow key={b.id}>
+                    <TableCell className="font-semibold">{b.building_name}</TableCell>
+                    <TableCell className="text-muted-foreground">{path}</TableCell>
+                    <TableCell className="text-muted-foreground">{userName(b.supervisor_id)}</TableCell>
+                    <TableCell className="text-muted-foreground">{b.deviceCount}</TableCell>
+                    <TableCell>
+                      <div className="flex justify-end gap-2">
+                        <Button variant="outline" size="sm" onClick={() => openEdit(b)}>Edit</Button>
+                        <Button variant="destructive" size="sm" onClick={() => setDeleteTarget(b)}>Delete</Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
               {buildings.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={6} className="py-6 text-center text-muted-foreground">No buildings yet.</TableCell>
+                  <TableCell colSpan={5} className="py-6 text-center text-muted-foreground">No buildings yet.</TableCell>
                 </TableRow>
               )}
             </TableBody>

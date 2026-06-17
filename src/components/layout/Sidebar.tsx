@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { Building2, ClipboardList, Cog, Droplet, FolderTree, LayoutGrid, MapPin, Server, Settings, Users, Warehouse } from 'lucide-react';
+import { Building2, ClipboardList, Cog, Droplet, FolderTree, LayoutGrid, MapPin, Server, Settings, User, Users, Warehouse } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { isAdminUser } from '@/lib/roles';
 import { cn } from '@/lib/utils';
@@ -21,6 +21,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/groups', label: 'Groups', icon: FolderTree, adminOnly: true },
   { to: '/locations', label: 'Locations', icon: MapPin, adminOnly: true },
   { to: '/audit-log', label: 'Audit Log', icon: ClipboardList, adminOnly: true },
+  { to: '/profile', label: 'My Profile', icon: User },
   { to: '/settings', label: 'Settings', icon: Settings },
 ];
 
