@@ -6,7 +6,7 @@ import {
   useEffect,
   type ReactNode,
 } from 'react';
-import { login as apiLogin, logout as apiLogout, getToken, decodeToken } from '@/services/api';
+import { login as apiLogin, logout as apiLogout, getToken, decodeToken, setAuditActor } from '@/services/api';
 import type { AuthUser } from '@/types';
 
 interface AuthContextValue {
@@ -28,6 +28,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (token) {
       const payload = decodeToken(token);
       if (payload && payload.exp > Date.now()) {
+        setAuditActor(payload.id);
         setUser({
           id: payload.id,
           username: payload.sub,

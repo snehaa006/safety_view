@@ -41,6 +41,43 @@ function isAdmin(role: string | undefined | null): boolean {
   return r === 'ADMIN' || r === 'SUPER_ADMIN';
 }
 
+// ---------------------------------------------------------------------------
+// Audit logging
+//   The acting user is tracked in a module variable (set from AuthContext) so
+//   we don't have to thread it through every call. Writes go through the
+//   log_audit SECURITY DEFINER RPC; failures never break the main action.
+// ---------------------------------------------------------------------------
+
+let auditActorId: number | null = null;
+
+export function setAuditActor(id: number | null): void {
+  auditActorId = id;
+}
+
+interface AuditOpts {
+  table?: string;
+  id?: number | null;
+  old?: unknown;
+  new?: unknown;
+  description?: string;
+}
+
+async function logAudit(action: string, opts: AuditOpts = {}): Promise<void> {
+  try {
+    await supabase.rpc('log_audit', {
+      p_performed_by: auditActorId,
+      p_action: action,
+      p_target_table: opts.table ?? null,
+      p_target_id: opts.id ?? null,
+      p_old: opts.old ?? null,
+      p_new: opts.new ?? null,
+      p_description: opts.description ?? null,
+    });
+  } catch {
+    /* logging must never break the primary action */
+  }
+}
+
 // Read device_ids explicitly assigned to a user via the user_devices join
 // table. Returns [] if the table doesn't exist yet (pre-migration).
 async function getUserDeviceIds(userId: number | null | undefined): Promise<number[]> {
@@ -113,10 +150,14 @@ export async function login(username: string, password: string): Promise<LoginRe
 
   const token = `supabase.${btoa(JSON.stringify(payload))}.sig`;
   localStorage.setItem(AUTH_TOKEN_KEY, token);
+  setAuditActor(user.id);
+  void logAudit('USER_LOGIN', { table: 'users', id: user.id, description: `Login: ${user.username}` });
   return { token, user };
 }
 
 export function logout(): void {
+  if (auditActorId != null) void logAudit('USER_LOGOUT', { table: 'users', id: auditActorId, description: 'Logout' });
+  setAuditActor(null);
   localStorage.removeItem(AUTH_TOKEN_KEY);
 }
 
@@ -347,7 +388,9 @@ export async function createDevice(input: {
     .maybeSingle();
 
   if (error) throw new Error(error.message);
-  return data as { id: number; device_uuid: string };
+  const created = data as { id: number; device_uuid: string };
+  void logAudit('DEVICE_CREATED', { table: 'devices', id: created.id, new: input, description: `Device ${input.device_uuid} created` });
+  return created;
 }
 
 export async function updateDevice(
@@ -367,12 +410,14 @@ export async function updateDevice(
     .maybeSingle();
 
   if (error) throw new Error(error.message);
+  void logAudit('DEVICE_UPDATED', { table: 'devices', id, new: fields });
   return data as { id: number };
 }
 
 export async function deleteDevice(id: number): Promise<{ id: number }> {
   const { error } = await supabase.from('devices').delete().eq('id', id);
   if (error) throw new Error(error.message);
+  void logAudit('DEVICE_DELETED', { table: 'devices', id });
   return { id };
 }
 
@@ -503,18 +548,22 @@ function buildingPatch(input: Partial<BuildingInput>): Record<string, unknown> {
 export async function createBuilding(input: BuildingInput): Promise<{ id: number }> {
   const { data, error } = await supabase.from('buildings').insert(buildingPatch(input)).select('id').maybeSingle();
   if (error) throw new Error(error.message);
-  return data as { id: number };
+  const created = data as { id: number };
+  void logAudit('BUILDING_CREATED', { table: 'buildings', id: created.id, new: input, description: `Building ${input.building_name} created` });
+  return created;
 }
 
 export async function updateBuilding(id: number, input: Partial<BuildingInput>): Promise<{ id: number }> {
   const { data, error } = await supabase.from('buildings').update(buildingPatch(input)).eq('id', id).select('id').maybeSingle();
   if (error) throw new Error(error.message);
+  void logAudit('BUILDING_UPDATED', { table: 'buildings', id, new: input });
   return data as { id: number };
 }
 
 export async function deleteBuilding(id: number): Promise<{ id: number }> {
   const { error } = await supabase.from('buildings').delete().eq('id', id);
   if (error) throw new Error(error.message);
+  void logAudit('BUILDING_DELETED', { table: 'buildings', id });
   return { id };
 }
 
@@ -546,7 +595,9 @@ export async function createOrganization(input: {
     .select('id')
     .single();
   if (error) throw new Error(error.message);
-  return data as { id: number };
+  const created = data as { id: number };
+  void logAudit('ORG_CREATED', { table: 'organizations', id: created.id, new: input, description: `Organization ${input.organization_name} created` });
+  return created;
 }
 
 export async function updateOrganization(
@@ -564,12 +615,14 @@ export async function updateOrganization(
     .select('id')
     .single();
   if (error) throw new Error(error.message);
+  void logAudit('ORG_UPDATED', { table: 'organizations', id, new: fields });
   return data as { id: number };
 }
 
 export async function deleteOrganization(id: number): Promise<{ id: number }> {
   const { error } = await supabase.from('organizations').delete().eq('id', id);
   if (error) throw new Error(error.message);
+  void logAudit('ORG_DELETED', { table: 'organizations', id });
   return { id };
 }
 
@@ -587,7 +640,9 @@ export async function createGroup(input: {
     .select('id')
     .single();
   if (error) throw new Error(error.message);
-  return data as { id: number };
+  const created = data as { id: number };
+  void logAudit('GROUP_CREATED', { table: 'groups', id: created.id, new: input, description: `Group ${input.group_name} created` });
+  return created;
 }
 
 export async function updateGroup(
@@ -604,12 +659,14 @@ export async function updateGroup(
     .select('id')
     .single();
   if (error) throw new Error(error.message);
+  void logAudit('GROUP_UPDATED', { table: 'groups', id, new: fields });
   return data as { id: number };
 }
 
 export async function deleteGroup(id: number): Promise<{ id: number }> {
   const { error } = await supabase.from('groups').delete().eq('id', id);
   if (error) throw new Error(error.message);
+  void logAudit('GROUP_DELETED', { table: 'groups', id });
   return { id };
 }
 
@@ -628,6 +685,7 @@ export async function changePassword(
     p_new_password: newPassword,
   });
   if (error) throw new Error(error.message);
+  void logAudit('PASSWORD_CHANGED', { table: 'users', id: userId, description: 'Password changed' });
 }
 
 // ---------------------------------------------------------------------------
@@ -745,9 +803,14 @@ export async function fetchEventsByDevice(deviceId: number): Promise<SafetyEvent
 }
 
 export async function acknowledgeEvent(eventId: number): Promise<{ id: number; is_acknowledged: boolean }> {
+  // Set acknowledged_by so the DB audit trigger records who acknowledged it.
   const { data, error } = await supabase
     .from('events')
-    .update({ is_acknowledged: true, acknowledged_at: new Date().toISOString() })
+    .update({
+      is_acknowledged: true,
+      acknowledged_at: new Date().toISOString(),
+      acknowledged_by: auditActorId,
+    })
     .eq('id', eventId)
     .select('id, is_acknowledged')
     .maybeSingle();
@@ -968,6 +1031,7 @@ export async function createUser(input: CreateUserInput): Promise<{ id: number |
     if (Object.keys(patch).length > 0) await supabase.from('users').update(patch).eq('id', newId);
   }
 
+  void logAudit('USER_CREATED', { table: 'users', id: newId ?? null, description: `Created user ${input.username} (${input.role})` });
   return { id: newId, username: input.username };
 }
 
@@ -995,6 +1059,7 @@ export async function updateUser(userId: number, fields: UpdateUserInput): Promi
     .maybeSingle();
 
   if (error) throw new Error(error.message);
+  void logAudit('USER_UPDATED', { table: 'users', id: userId, new: fields });
   return data as { id: number };
 }
 
@@ -1023,6 +1088,7 @@ export async function toggleUserActive(
     .maybeSingle();
 
   if (error) throw new Error(error.message);
+  void logAudit(isActive ? 'USER_ACTIVATED' : 'USER_DEACTIVATED', { table: 'users', id: userId });
   return data as { id: number; is_active: boolean };
 }
 
@@ -1062,7 +1128,9 @@ export async function createLocation(input: {
     .select('id')
     .single();
   if (error) throw new Error(error.message);
-  return data as { id: number };
+  const created = data as { id: number };
+  void logAudit('LOCATION_CREATED', { table: 'locations', id: created.id, new: input, description: `Location ${input.name} created` });
+  return created;
 }
 
 export async function updateLocation(
@@ -1080,12 +1148,14 @@ export async function updateLocation(
     .select('id')
     .single();
   if (error) throw new Error(error.message);
+  void logAudit('LOCATION_UPDATED', { table: 'locations', id, new: fields });
   return data as { id: number };
 }
 
 export async function deleteLocation(id: number): Promise<{ id: number }> {
   const { error } = await supabase.from('locations').delete().eq('id', id);
   if (error) throw new Error(error.message);
+  void logAudit('LOCATION_DELETED', { table: 'locations', id });
   return { id };
 }
 
@@ -1094,11 +1164,7 @@ export async function deleteLocation(id: number): Promise<{ id: number }> {
 // ---------------------------------------------------------------------------
 
 export async function fetchAuditLog(limit = 200): Promise<AuditLogEntry[]> {
-  const { data, error } = await supabase
-    .from('audit_log')
-    .select('id, performed_by, user_role, action, target_table, target_id, description, created_at')
-    .order('created_at', { ascending: false })
-    .limit(limit);
+  const { data, error } = await supabase.rpc('get_audit_log', { p_limit: limit });
   if (error) throw new Error(error.message);
   return (data ?? []) as AuditLogEntry[];
 }
@@ -1110,5 +1176,6 @@ export async function deleteUser(userId: number): Promise<{ id: number }> {
 
   const { error } = await supabase.from('users').delete().eq('id', userId);
   if (error) throw new Error(error.message);
+  void logAudit('USER_DELETED', { table: 'users', id: userId });
   return { id: userId };
 }
