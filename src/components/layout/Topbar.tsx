@@ -4,22 +4,27 @@ import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/button';
 
 function titleForPath(pathname: string): string {
-  if (matchPath('/buildings', pathname)) return 'Buildings';
-  if (matchPath('/buildings/*', pathname)) return 'Building';
-  if (matchPath('/building-management', pathname)) return 'Building Management';
-  if (matchPath('/devices', pathname)) return 'Devices';
-  if (matchPath('/devices/*', pathname)) return 'Device Dashboard';
-  if (matchPath('/device-management', pathname)) return 'Device Management';
-  if (matchPath('/organizations', pathname)) return 'Organizations';
-  if (matchPath('/groups', pathname)) return 'Groups';
-  if (matchPath('/locations', pathname)) return 'Locations';
-  if (matchPath('/audit-log', pathname)) return 'Audit Log';
-  if (matchPath('/settings', pathname)) return 'Settings';
-  if (matchPath('/profile', pathname)) return 'My Profile';
-  if (matchPath('/users/new', pathname)) return 'New User';
-  if (matchPath('/users/:id/edit', pathname)) return 'Edit User';
-  if (matchPath('/users/:id', pathname)) return 'User Details';
-  if (matchPath('/users', pathname)) return 'User Management';
+  const map: [string, string][] = [
+    ['/buildings/*', 'Building'],
+    ['/buildings', 'Buildings'],
+    ['/panels/*', 'Panel'],
+    ['/alerts', 'Alerts'],
+    ['/building-management', 'Building Management'],
+    ['/panel-management', 'Panel Management'],
+    ['/groups', 'Groups'],
+    ['/locations', 'Locations'],
+    ['/organizations', 'Organizations'],
+    ['/roles', 'Roles'],
+    ['/login-logs', 'Login Logs'],
+    ['/audit-log', 'Audit Log'],
+    ['/users/new', 'New User'],
+    ['/users/:id/edit', 'Edit User'],
+    ['/users/:id', 'User Details'],
+    ['/users', 'User Management'],
+    ['/profile', 'My Profile'],
+    ['/settings', 'Settings'],
+  ];
+  for (const [pattern, title] of map) if (matchPath(pattern, pathname)) return title;
   return 'SafetyView';
 }
 
@@ -30,26 +35,20 @@ export default function Topbar() {
   return (
     <header className="flex items-center justify-between border-b border-border bg-card px-6 py-4">
       <h2 className="text-xl font-bold tracking-tight">{titleForPath(pathname)}</h2>
-
       <div className="flex items-center gap-4">
         <div className="flex items-center gap-1.5 rounded-full border border-ok-border bg-ok-bg px-3 py-1 text-xs font-medium text-ok-text">
           <Clock className="h-3.5 w-3.5" />
           <span>Live</span>
         </div>
-
         <div className="flex items-center gap-3">
           <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary text-sm font-bold text-primary-foreground">
             {user?.username?.charAt(0).toUpperCase()}
           </div>
           <div className="leading-tight">
             <div className="text-sm font-semibold">{user?.username}</div>
-            <div className="text-xs text-muted-foreground">
-              {String(user?.role || '').replace(/_/g, ' ')}
-            </div>
+            <div className="max-w-[160px] truncate text-xs text-muted-foreground">{user?.roles?.join(', ') || 'No role'}</div>
           </div>
-          <Button variant="ghost" size="icon" onClick={logout} title="Sign out">
-            <LogOut className="h-4 w-4" />
-          </Button>
+          <Button variant="ghost" size="icon" onClick={logout} title="Sign out"><LogOut className="h-4 w-4" /></Button>
         </div>
       </div>
     </header>

@@ -1,5 +1,8 @@
 import { NavLink } from 'react-router-dom';
-import { Building2, ClipboardList, Cog, Droplet, FolderTree, LayoutGrid, MapPin, Server, Settings, User, Users, Warehouse } from 'lucide-react';
+import {
+  Bell, Building2, ClipboardList, Cpu, Droplet, FolderTree, KeyRound,
+  LogIn, MapPin, ShieldCheck, User, Users, Warehouse,
+} from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { isAdminUser } from '@/lib/roles';
 import { cn } from '@/lib/utils';
@@ -7,22 +10,24 @@ import { cn } from '@/lib/utils';
 interface NavItem {
   to: string;
   label: string;
-  icon: typeof LayoutGrid;
+  icon: typeof Users;
   adminOnly?: boolean;
 }
 
 const NAV_ITEMS: NavItem[] = [
   { to: '/buildings', label: 'Buildings', icon: Warehouse },
-  { to: '/devices', label: 'Devices', icon: Server },
+  { to: '/alerts', label: 'Alerts', icon: Bell },
   { to: '/building-management', label: 'Building Management', icon: Building2, adminOnly: true },
-  { to: '/device-management', label: 'Device Management', icon: Cog, adminOnly: true },
-  { to: '/users', label: 'User Management', icon: Users, adminOnly: true },
-  { to: '/organizations', label: 'Organizations', icon: Building2, adminOnly: true },
+  { to: '/panel-management', label: 'Panel Management', icon: Cpu, adminOnly: true },
   { to: '/groups', label: 'Groups', icon: FolderTree, adminOnly: true },
   { to: '/locations', label: 'Locations', icon: MapPin, adminOnly: true },
+  { to: '/organizations', label: 'Organizations', icon: Building2, adminOnly: true },
+  { to: '/users', label: 'Users', icon: Users, adminOnly: true },
+  { to: '/roles', label: 'Roles', icon: KeyRound, adminOnly: true },
+  { to: '/login-logs', label: 'Login Logs', icon: LogIn, adminOnly: true },
   { to: '/audit-log', label: 'Audit Log', icon: ClipboardList, adminOnly: true },
   { to: '/profile', label: 'My Profile', icon: User },
-  { to: '/settings', label: 'Settings', icon: Settings },
+  { to: '/settings', label: 'Settings', icon: ShieldCheck },
 ];
 
 export default function Sidebar() {
@@ -39,7 +44,7 @@ export default function Sidebar() {
         <span className="text-lg font-bold tracking-tight">SafetyView</span>
       </div>
 
-      <nav className="flex flex-1 flex-col gap-0.5 p-3">
+      <nav className="flex flex-1 flex-col gap-0.5 overflow-y-auto p-3">
         {items.map((item) => {
           const Icon = item.icon;
           return (
@@ -49,9 +54,7 @@ export default function Sidebar() {
               className={({ isActive }) =>
                 cn(
                   'flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors',
-                  isActive
-                    ? 'bg-water-bg text-water-text'
-                    : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
+                  isActive ? 'bg-water-bg text-water-text' : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
                 )
               }
             >
@@ -63,13 +66,8 @@ export default function Sidebar() {
       </nav>
 
       <div className="border-t border-border px-5 py-4">
-        <div className="flex items-center gap-3">
-          <LayoutGrid className="h-4 w-4 text-muted-foreground" />
-          <div className="leading-tight">
-            <div className="text-sm font-semibold">{user?.username}</div>
-            <div className="text-xs text-muted-foreground">{String(user?.role || '').replace(/_/g, ' ')}</div>
-          </div>
-        </div>
+        <div className="text-sm font-semibold">{user?.username}</div>
+        <div className="truncate text-xs text-muted-foreground">{user?.roles?.join(', ') || 'No role'}</div>
       </div>
     </aside>
   );

@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Building2, CheckCircle2, WifiOff, Activity } from 'lucide-react';
-import { fetchBuildings } from '@/services/api';
+import { Building2, Cpu, Flame, AlertTriangle } from 'lucide-react';
+import { fetchBuildings, summariseBuildings, locationLabel } from '@/services/api';
 import { useAuth } from '@/context/AuthContext';
 import { Card } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import type { Building } from '@/types';
 
-function MetricCard({ label, value, icon: Icon, tone }: { label: string; value: number; icon: typeof Activity; tone: string }) {
+function Metric({ label, value, icon: Icon, tone }: { label: string; value: number; icon: typeof Cpu; tone: string }) {
   return (
     <Card className="flex items-center gap-4 p-5">
       <div className={cn('flex h-10 w-10 items-center justify-center rounded-md', tone)}>
@@ -45,44 +45,33 @@ export default function BuildingsPage() {
     };
   }, [user]);
 
-  const scope = useMemo(
-    () =>
-      buildings.reduce(
-        (acc, b) => ({
-          healthy: acc.healthy + b.healthy,
-          offline: acc.offline + b.offline,
-          connected: acc.connected + b.connected,
-        }),
-        { healthy: 0, offline: 0, connected: 0 }
-      ),
-    [buildings]
-  );
+  const scope = useMemo(() => summariseBuildings(buildings), [buildings]);
 
   if (loading) return <div className="py-20 text-center text-muted-foreground">Loading buildings…</div>;
-  if (error)
-    return <div className="rounded-md border border-crit-border bg-crit-bg px-4 py-3 text-sm text-crit-text">{error}</div>;
+  if (error) return <div className="rounded-md border border-crit-border bg-crit-bg px-4 py-3 text-sm text-crit-text">{error}</div>;
 
   return (
     <section className="space-y-5">
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <MetricCard label="Healthy Devices" value={scope.healthy} icon={CheckCircle2} tone="bg-ok-bg text-ok-strong" />
-        <MetricCard label="Offline Devices" value={scope.offline} icon={WifiOff} tone="bg-crit-bg text-crit-strong" />
-        <MetricCard label="Connected Devices" value={scope.connected} icon={Activity} tone="bg-water-bg text-water-strong" />
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <Metric label="Buildings" value={scope.buildings} icon={Building2} tone="bg-water-bg text-water-strong" />
+        <Metric label="Panels" value={scope.panels} icon={Cpu} tone="bg-water-bg text-water-strong" />
+        <Metric label="Fire Zones" value={scope.fire} icon={Flame} tone="bg-crit-bg text-crit-strong" />
+        <Metric label="Fault Zones" value={scope.fault} icon={AlertTriangle} tone="bg-warn-bg text-warn-strong" />
       </div>
 
       <div>
         <h3 className="text-lg font-semibold">Buildings in your scope</h3>
-        <p className="text-sm text-muted-foreground">Open a building to see its devices and zones</p>
+        <p className="text-sm text-muted-foreground">Open a building to see its panels and zones</p>
       </div>
 
       {buildings.length === 0 ? (
         <Card className="border-dashed p-12 text-center text-sm text-muted-foreground">
-          No buildings are visible to your account yet.
+          No buildings are assigned to your account yet.
         </Card>
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {buildings.map((b) => {
-            const accent = b.offline > 0 ? 'border-l-crit-strong' : 'border-l-ok-strong';
+            const accent = b.fire > 0 ? 'border-l-crit-strong' : b.fault > 0 ? 'border-l-warn-strong' : 'border-l-ok-strong';
             return (
               <Card
                 key={b.id}
@@ -93,16 +82,14 @@ export default function BuildingsPage() {
                   <div className="flex h-9 w-9 items-center justify-center rounded-md bg-secondary text-primary">
                     <Building2 className="h-5 w-5" />
                   </div>
-                  <span className="text-xs text-muted-foreground">{b.location_name || '—'}</span>
+                  {b.group_name && <span className="text-xs text-muted-foreground">{b.group_name}</span>}
                 </div>
                 <div className="font-semibold">{b.building_name}</div>
-                {b.address && <div className="truncate text-xs text-muted-foreground">{b.address}</div>}
+                <div className="truncate text-xs text-muted-foreground">{locationLabel(b.location)}</div>
                 <div className="mt-2 flex gap-4 border-t border-border pt-3 text-xs text-muted-foreground">
-                  <span><strong className="text-foreground">{b.deviceCount}</strong> devices</span>
-                  <span className="text-ok-text"><strong className="text-ok-strong">{b.healthy}</strong> healthy</span>
-                  <span className={b.offline > 0 ? 'text-crit-text' : ''}>
-                    <strong className={b.offline > 0 ? 'text-crit-strong' : 'text-foreground'}>{b.offline}</strong> offline
-                  </span>
+                  <span><strong className="text-foreground">{b.panelCount}</strong> panels</span>
+                  <span className={b.fire > 0 ? 'text-crit-text' : ''}><strong className={b.fire > 0 ? 'text-crit-strong' : 'text-foreground'}>{b.fire}</strong> fire</span>
+                  <span className={b.fault > 0 ? 'text-warn-text' : ''}><strong className={b.fault > 0 ? 'text-warn-strong' : 'text-foreground'}>{b.fault}</strong> fault</span>
                 </div>
               </Card>
             );
