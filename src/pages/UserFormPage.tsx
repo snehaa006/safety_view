@@ -1,20 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ChevronLeft, Plus, Trash2 } from 'lucide-react';
+import { ChevronLeft } from 'lucide-react';
 import {
-  fetchGroups,
-  fetchDevices,
-  fetchOrganizations,
-  fetchBuildings,
-  fetchLocations,
-  fetchUserById,
-  createUser,
-  updateUser,
-  setUserDevices,
-  setUserAlertEmails,
+  fetchRoles, fetchOrganizations, fetchBuildings, fetchUsers, fetchUserById,
+  createUser, updateUser, setUserRoles, setUserBuildings,
 } from '@/services/api';
 import { useAuth } from '@/context/AuthContext';
-import { parseTodos, serializeTodos } from '@/lib/todos';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -22,19 +13,9 @@ import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { PasswordInput } from '@/components/ui/password-input';
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
-import { ROLE_OPTIONS, type Building, type Device, type Group, type Location, type Organization, type TodoItem } from '@/types';
-
-const ROLE_LOCATION_TYPE: Record<string, 'NATIONAL' | 'REGIONAL' | 'DISTRICT'> = {
-  NATIONAL_MANAGER: 'NATIONAL',
-  REGIONAL_MANAGER: 'REGIONAL',
-  DISTRICT_MANAGER: 'DISTRICT',
-};
+import type { Building, ManagedUser, Organization, Role } from '@/types';
 
 interface FormState {
   username: string;
@@ -44,40 +25,16 @@ interface FormState {
   first_name: string;
   last_name: string;
   mobile_no: string;
-  role: string;
-  group_id: string;
   organization_id: string;
-  building_id: string;
-  location_id: string;
-  device_type: string;
-  customer_id: string;
-  alert_email_enabled: boolean;
-  alertEmails: string[];
-  todos: TodoItem[];
-  deviceIds: number[];
+  parent_user_id: string;
+  remarks: string;
+  roleIds: number[];
+  buildingIds: number[];
 }
-
 type Errors = Partial<Record<keyof FormState, string>>;
-
 const EMPTY: FormState = {
-  username: '',
-  email: '',
-  password: '',
-  confirmPassword: '',
-  first_name: '',
-  last_name: '',
-  mobile_no: '',
-  role: 'VIEWER',
-  group_id: '',
-  organization_id: '',
-  building_id: '',
-  location_id: '',
-  device_type: '',
-  customer_id: '',
-  alert_email_enabled: false,
-  alertEmails: [],
-  todos: [],
-  deviceIds: [],
+  username: '', email: '', password: '', confirmPassword: '', first_name: '', last_name: '', mobile_no: '',
+  organization_id: '', parent_user_id: '', remarks: '', roleIds: [], buildingIds: [],
 };
 
 export default function UserFormPage() {
@@ -86,13 +43,12 @@ export default function UserFormPage() {
   const { user: currentUser } = useAuth();
   const isEditing = !!id;
 
-  const [groups, setGroups] = useState<Group[]>([]);
+  const [roles, setRoles] = useState<Role[]>([]);
   const [orgs, setOrgs] = useState<Organization[]>([]);
-  const [devices, setDevices] = useState<Device[]>([]);
   const [buildings, setBuildings] = useState<Building[]>([]);
-  const [locations, setLocations] = useState<Location[]>([]);
+  const [users, setUsers] = useState<ManagedUser[]>([]);
   const [form, setForm] = useState<FormState>(EMPTY);
-  const initialRef = useRef<string>(JSON.stringify(EMPTY));
+  const initialRef = useRef(JSON.stringify(EMPTY));
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<Errors>({});
@@ -101,110 +57,36 @@ export default function UserFormPage() {
   useEffect(() => {
     (async () => {
       try {
-        const [g, o, d, b, l] = await Promise.all([
-          fetchGroups(),
-          fetchOrganizations().catch(() => []),
-          fetchDevices(currentUser),
-          fetchBuildings(currentUser).catch(() => []),
-          fetchLocations().catch(() => []),
+        const [r, o, b, u] = await Promise.all([
+          fetchRoles(), fetchOrganizations().catch(() => []), fetchBuildings(currentUser), fetchUsers(),
         ]);
-        setGroups(g);
-        setOrgs(o);
-        setDevices(d);
-        setBuildings(b);
-        setLocations(l);
-
-        let next: FormState;
+        setRoles(r); setOrgs(o); setBuildings(b); setUsers(u);
+        let next = EMPTY;
         if (isEditing) {
-          const u = await fetchUserById(Number(id));
-          next = u
-            ? {
-                username: u.username,
-                email: u.email || '',
-                password: '',
-                confirmPassword: '',
-                first_name: u.first_name || '',
-                last_name: u.last_name || '',
-                mobile_no: u.mobile_no || '',
-                role: u.role,
-                group_id: u.group_id ? String(u.group_id) : '',
-                organization_id: u.organization_id ? String(u.organization_id) : '',
-                building_id: u.building_id ? String(u.building_id) : '',
-                location_id: u.location_id ? String(u.location_id) : '',
-                device_type: u.device_type || '',
-                customer_id: u.customer_id || '',
-                alert_email_enabled: !!u.alert_email_enabled,
-                alertEmails: u.alert_emails ?? [],
-                todos: parseTodos(u.remarks),
-                deviceIds: u.assigned_device_ids.length ? u.assigned_device_ids : u.device_id ? [u.device_id] : [],
-              }
-            : EMPTY;
-        } else {
-          next = { ...EMPTY, customer_id: crypto.randomUUID() };
+          const mu = await fetchUserById(Number(id));
+          if (mu) next = {
+            username: mu.username, email: mu.email || '', password: '', confirmPassword: '',
+            first_name: mu.first_name || '', last_name: mu.last_name || '', mobile_no: mu.mobile_no || '',
+            organization_id: mu.organization_id ? String(mu.organization_id) : '',
+            parent_user_id: mu.parent_user_id ? String(mu.parent_user_id) : '',
+            remarks: mu.remarks || '', roleIds: mu.role_ids, buildingIds: mu.building_ids,
+          };
         }
-        setForm(next);
-        initialRef.current = JSON.stringify(next);
-      } catch (err) {
-        setSubmitError(err instanceof Error ? err.message : 'Failed to load form data');
-      } finally {
-        setLoading(false);
-      }
+        setForm(next); initialRef.current = JSON.stringify(next);
+      } catch (err) { setSubmitError(err instanceof Error ? err.message : 'Failed to load'); }
+      finally { setLoading(false); }
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line
   }, [id]);
 
   const isDirty = JSON.stringify(form) !== initialRef.current;
-
-  const devicesForGroup = useMemo(() => {
-    if (!form.group_id) return [];
-    return devices.filter((d) => String(d.group_id) === form.group_id);
-  }, [devices, form.group_id]);
-
-  function update<K extends keyof FormState>(key: K, value: FormState[K]) {
-    setForm((prev) => ({ ...prev, [key]: value }));
-    setErrors((prev) => (prev[key] ? { ...prev, [key]: undefined } : prev));
+  function update<K extends keyof FormState>(k: K, v: FormState[K]) {
+    setForm((p) => ({ ...p, [k]: v }));
+    setErrors((p) => (p[k] ? { ...p, [k]: undefined } : p));
     setSubmitError('');
   }
-
-  function setGroup(value: string) {
-    setForm((prev) => {
-      const groupDevIds = devices.filter((d) => String(d.group_id) === value).map((d) => d.id);
-      return { ...prev, group_id: value, deviceIds: prev.deviceIds.filter((x) => groupDevIds.includes(x)) };
-    });
-  }
-
-  function toggleDevice(deviceId: number) {
-    setForm((prev) => ({
-      ...prev,
-      deviceIds: prev.deviceIds.includes(deviceId)
-        ? prev.deviceIds.filter((x) => x !== deviceId)
-        : [...prev.deviceIds, deviceId],
-    }));
-  }
-
-  // Alert email list helpers
-  function addEmail() {
-    update('alertEmails', [...form.alertEmails, '']);
-  }
-  function setEmail(i: number, value: string) {
-    update('alertEmails', form.alertEmails.map((e, idx) => (idx === i ? value : e)));
-  }
-  function removeEmail(i: number) {
-    update('alertEmails', form.alertEmails.filter((_, idx) => idx !== i));
-  }
-
-  // To-do notes helpers
-  function addTodo() {
-    update('todos', [...form.todos, { text: '', done: false }]);
-  }
-  function setTodoText(i: number, text: string) {
-    update('todos', form.todos.map((t, idx) => (idx === i ? { ...t, text } : t)));
-  }
-  function toggleTodo(i: number) {
-    update('todos', form.todos.map((t, idx) => (idx === i ? { ...t, done: !t.done } : t)));
-  }
-  function removeTodo(i: number) {
-    update('todos', form.todos.filter((_, idx) => idx !== i));
+  function toggle(list: 'roleIds' | 'buildingIds', val: number) {
+    setForm((p) => ({ ...p, [list]: p[list].includes(val) ? p[list].filter((x) => x !== val) : [...p[list], val] }));
   }
 
   function validate(): boolean {
@@ -223,266 +105,118 @@ export default function UserFormPage() {
   async function handleSubmit() {
     setSubmitError('');
     if (!validate()) return;
-
-    const primaryDevice = form.deviceIds[0] ?? null;
-    const groupId = form.group_id ? Number(form.group_id) : null;
     const orgId = form.organization_id ? Number(form.organization_id) : null;
-    const buildingId = form.building_id ? Number(form.building_id) : null;
-    const locationId = form.location_id ? Number(form.location_id) : null;
-    const remarks = serializeTodos(form.todos);
-
+    const parentId = form.parent_user_id ? Number(form.parent_user_id) : null;
     try {
       setSubmitting(true);
       let userId = isEditing ? Number(id) : undefined;
-
       if (isEditing) {
         await updateUser(Number(id), {
-          role: form.role,
-          email: form.email.trim(),
-          first_name: form.first_name.trim(),
-          last_name: form.last_name.trim(),
-          mobile_no: form.mobile_no.trim(),
-          group_id: groupId,
-          device_id: primaryDevice,
-          organization_id: orgId,
-          building_id: buildingId,
-          location_id: locationId,
-          device_type: form.device_type.trim(),
-          alert_email_enabled: form.alert_email_enabled,
-          remarks,
+          email: form.email.trim(), first_name: form.first_name.trim(), last_name: form.last_name.trim(),
+          mobile_no: form.mobile_no.trim(), organization_id: orgId, parent_user_id: parentId, remarks: form.remarks.trim(),
         });
+        await setUserRoles(Number(id), form.roleIds);
+        await setUserBuildings(Number(id), form.buildingIds);
       } else {
         const created = await createUser({
-          username: form.username.trim(),
-          email: form.email.trim(),
-          password: form.password,
-          role: form.role,
-          first_name: form.first_name.trim(),
-          last_name: form.last_name.trim(),
-          mobile_no: form.mobile_no.trim(),
-          group_id: groupId,
-          device_id: primaryDevice,
-          organization_id: orgId,
-          building_id: buildingId,
-          location_id: locationId,
-          customer_id: form.customer_id || null,
-          device_type: form.device_type.trim() || null,
-          alert_email_enabled: form.alert_email_enabled,
-          remarks: remarks || null,
+          username: form.username.trim(), email: form.email.trim(), password: form.password,
+          first_name: form.first_name.trim(), last_name: form.last_name.trim(), mobile_no: form.mobile_no.trim(),
+          organization_id: orgId, parent_user_id: parentId, remarks: form.remarks.trim() || null,
+          role_ids: form.roleIds, building_ids: form.buildingIds,
         });
         userId = created.id;
       }
-
-      if (userId != null) {
-        await setUserDevices(userId, form.deviceIds);
-        await setUserAlertEmails(userId, form.alertEmails);
-      }
       navigate('/users');
-    } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : 'Failed to save user.');
-    } finally {
-      setSubmitting(false);
-    }
+    } catch (err) { setSubmitError(err instanceof Error ? err.message : 'Failed to save user.'); }
+    finally { setSubmitting(false); }
   }
 
   if (loading) return <div className="py-20 text-center text-muted-foreground">Loading…</div>;
 
   return (
     <section className="mx-auto max-w-3xl space-y-4">
-      <button
-        onClick={() => navigate('/users')}
-        className="inline-flex items-center gap-1 text-sm font-medium text-muted-foreground hover:text-foreground"
-      >
+      <button onClick={() => navigate('/users')} className="inline-flex items-center gap-1 text-sm font-medium text-muted-foreground hover:text-foreground">
         <ChevronLeft className="h-4 w-4" /> Back to Users
       </button>
-
       <Card className="p-6">
         <h3 className="mb-5 text-lg font-bold">{isEditing ? `Edit User · ${form.username}` : 'New User'}</h3>
-
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field label="Username" error={errors.username}>
-            <Input value={form.username} onChange={(e) => update('username', e.target.value)} placeholder="e.g. rajesh.sharma" disabled={isEditing} aria-invalid={!!errors.username} />
+            <Input value={form.username} onChange={(e) => update('username', e.target.value)} disabled={isEditing} />
           </Field>
           <Field label="Email" error={errors.email}>
-            <Input type="email" value={form.email} onChange={(e) => update('email', e.target.value)} placeholder="user@company.com" aria-invalid={!!errors.email} />
+            <Input type="email" value={form.email} onChange={(e) => update('email', e.target.value)} />
           </Field>
-          <Field label="First Name">
-            <Input value={form.first_name} onChange={(e) => update('first_name', e.target.value)} />
-          </Field>
-          <Field label="Last Name">
-            <Input value={form.last_name} onChange={(e) => update('last_name', e.target.value)} />
-          </Field>
-          <Field label="Mobile No.">
-            <Input value={form.mobile_no} onChange={(e) => update('mobile_no', e.target.value)} />
-          </Field>
-          <Field label="Device Type">
-            <Input value={form.device_type} onChange={(e) => update('device_type', e.target.value)} placeholder="e.g. SIA Device" />
-          </Field>
-          <Field label="Role">
-            <Select value={form.role} onValueChange={(v) => update('role', v)}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {ROLE_OPTIONS.map((r) => (
-                  <SelectItem key={r} value={r}>{r.replace(/_/g, ' ')}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </Field>
+          <Field label="First Name"><Input value={form.first_name} onChange={(e) => update('first_name', e.target.value)} /></Field>
+          <Field label="Last Name"><Input value={form.last_name} onChange={(e) => update('last_name', e.target.value)} /></Field>
+          <Field label="Mobile No."><Input value={form.mobile_no} onChange={(e) => update('mobile_no', e.target.value)} /></Field>
           <Field label="Organization">
             <Select value={form.organization_id || 'none'} onValueChange={(v) => update('organization_id', v === 'none' ? '' : v)}>
               <SelectTrigger><SelectValue placeholder="No organization" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="none">— No organization —</SelectItem>
-                {orgs.map((o) => (
-                  <SelectItem key={o.id} value={String(o.id)}>{o.organization_name}</SelectItem>
-                ))}
+                {orgs.map((o) => <SelectItem key={o.id} value={String(o.id)}>{o.organization_name}</SelectItem>)}
               </SelectContent>
             </Select>
           </Field>
-          <Field label="Group (grants device access)">
-            <Select value={form.group_id || 'none'} onValueChange={(v) => setGroup(v === 'none' ? '' : v)}>
-              <SelectTrigger><SelectValue placeholder="No group" /></SelectTrigger>
+          <Field label="Reports To">
+            <Select value={form.parent_user_id || 'none'} onValueChange={(v) => update('parent_user_id', v === 'none' ? '' : v)}>
+              <SelectTrigger><SelectValue placeholder="No manager" /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="none">— No group —</SelectItem>
-                {groups.map((g) => (
-                  <SelectItem key={g.id} value={String(g.id)}>{g.group_name}</SelectItem>
-                ))}
+                <SelectItem value="none">— No manager —</SelectItem>
+                {users.filter((u) => String(u.id) !== id).map((u) => <SelectItem key={u.id} value={String(u.id)}>{u.username}</SelectItem>)}
               </SelectContent>
             </Select>
           </Field>
-          {ROLE_LOCATION_TYPE[form.role] && (
-            <Field label={`Managed Location (${ROLE_LOCATION_TYPE[form.role]})`}>
-              <Select value={form.location_id || 'none'} onValueChange={(v) => update('location_id', v === 'none' ? '' : v)}>
-                <SelectTrigger><SelectValue placeholder="No location" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">— No location —</SelectItem>
-                  {locations
-                    .filter((l) => l.type === ROLE_LOCATION_TYPE[form.role])
-                    .map((l) => (
-                      <SelectItem key={l.id} value={String(l.id)}>{l.name}</SelectItem>
-                    ))}
-                </SelectContent>
-              </Select>
-            </Field>
-          )}
-          {form.role === 'BUILDING_OPERATOR' && (
-            <Field label="Building (operator's building)">
-              <Select value={form.building_id || 'none'} onValueChange={(v) => update('building_id', v === 'none' ? '' : v)}>
-                <SelectTrigger><SelectValue placeholder="No building" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">— No building —</SelectItem>
-                  {buildings.map((b) => (
-                    <SelectItem key={b.id} value={String(b.id)}>{b.building_name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>
-          )}
-          <Field label="User ID (auto)">
-            <Input value={form.customer_id} readOnly className="font-mono text-xs" />
-          </Field>
         </div>
 
-        {/* Assigned devices */}
         <div className="mt-4">
-          <Label>Assigned Devices</Label>
-          {!form.group_id ? (
-            <div className="mt-1.5 text-sm text-muted-foreground">Select a group first to choose devices.</div>
-          ) : devicesForGroup.length === 0 ? (
-            <div className="mt-1.5 text-sm text-muted-foreground">No devices in this group yet.</div>
-          ) : (
-            <div className="mt-1.5 flex max-h-44 flex-col gap-2 overflow-y-auto rounded-md border border-border bg-background p-3">
-              {devicesForGroup.map((d) => (
-                <label key={d.id} className="flex cursor-pointer items-center gap-2 text-sm">
-                  <Checkbox checked={form.deviceIds.includes(d.id)} onCheckedChange={() => toggleDevice(d.id)} />
-                  <span className="flex flex-col leading-tight">
-                    {d.device_remarks || d.device_uuid}
-                    <span className="font-mono text-xs text-muted-foreground">{d.device_uuid}</span>
-                  </span>
-                </label>
-              ))}
-            </div>
-          )}
+          <Label>Roles</Label>
+          <div className="mt-1.5 grid grid-cols-2 gap-2 rounded-md border border-border bg-background p-3 sm:grid-cols-3">
+            {roles.map((r) => (
+              <label key={r.id} className="flex cursor-pointer items-center gap-2 text-sm">
+                <Checkbox checked={form.roleIds.includes(r.id)} onCheckedChange={() => toggle('roleIds', r.id)} /> {r.role_name}
+              </label>
+            ))}
+            {roles.length === 0 && <span className="text-sm text-muted-foreground">No roles defined.</span>}
+          </div>
         </div>
 
-        {/* Alert emails */}
-        <div className="mt-4 rounded-md border border-border p-4">
-          <label className="flex cursor-pointer items-center gap-2 text-sm font-medium">
-            <Checkbox checked={form.alert_email_enabled} onCheckedChange={(v) => update('alert_email_enabled', v === true)} />
-            Alert emails enabled
-          </label>
-          <div className="mt-3 flex items-center justify-between">
-            <Label>Alert Email List</Label>
-            <Button type="button" variant="outline" size="sm" onClick={addEmail}>
-              <Plus className="h-4 w-4" /> Add email
-            </Button>
+        <div className="mt-4">
+          <Label>Building Access</Label>
+          <div className="mt-1.5 flex max-h-44 flex-col gap-2 overflow-y-auto rounded-md border border-border bg-background p-3">
+            {buildings.map((b) => (
+              <label key={b.id} className="flex cursor-pointer items-center gap-2 text-sm">
+                <Checkbox checked={form.buildingIds.includes(b.id)} onCheckedChange={() => toggle('buildingIds', b.id)} />
+                {b.building_name}{b.group_name ? <span className="text-xs text-muted-foreground">· {b.group_name}</span> : null}
+              </label>
+            ))}
+            {buildings.length === 0 && <span className="text-sm text-muted-foreground">No buildings available.</span>}
           </div>
-          {form.alertEmails.length === 0 ? (
-            <p className="mt-2 text-sm text-muted-foreground">No alert emails added.</p>
-          ) : (
-            <div className="mt-2 flex flex-col gap-2">
-              {form.alertEmails.map((email, i) => (
-                <div key={i} className="flex items-center gap-2">
-                  <Input type="email" value={email} onChange={(e) => setEmail(i, e.target.value)} placeholder="alerts@company.com" />
-                  <Button type="button" variant="ghost" size="icon" onClick={() => removeEmail(i)}>
-                    <Trash2 className="h-4 w-4 text-crit-text" />
-                  </Button>
-                </div>
-              ))}
-            </div>
-          )}
         </div>
 
-        {/* Notes as a to-do checklist */}
-        <div className="mt-4 rounded-md border border-border p-4">
-          <div className="flex items-center justify-between">
-            <Label>Notes / To-do (private)</Label>
-            <Button type="button" variant="outline" size="sm" onClick={addTodo}>
-              <Plus className="h-4 w-4" /> Add item
-            </Button>
-          </div>
-          {form.todos.length === 0 ? (
-            <p className="mt-2 text-sm text-muted-foreground">No notes yet. Add a to-do item for this user.</p>
-          ) : (
-            <div className="mt-2 flex flex-col gap-2">
-              {form.todos.map((t, i) => (
-                <div key={i} className="flex items-center gap-2">
-                  <Checkbox checked={t.done} onCheckedChange={() => toggleTodo(i)} />
-                  <Input
-                    value={t.text}
-                    onChange={(e) => setTodoText(i, e.target.value)}
-                    placeholder="e.g. Verify phone number"
-                    className={t.done ? 'line-through text-muted-foreground' : ''}
-                  />
-                  <Button type="button" variant="ghost" size="icon" onClick={() => removeTodo(i)}>
-                    <Trash2 className="h-4 w-4 text-crit-text" />
-                  </Button>
-                </div>
-              ))}
-            </div>
-          )}
+        <div className="mt-4">
+          <Label>Notes</Label>
+          <textarea className="mt-1.5 flex min-h-[72px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            value={form.remarks} onChange={(e) => update('remarks', e.target.value)} placeholder="Internal notes" />
         </div>
 
         {!isEditing && (
           <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
             <Field label="Password" error={errors.password}>
-              <PasswordInput value={form.password} onChange={(e) => update('password', e.target.value)} placeholder="Min. 8 characters" aria-invalid={!!errors.password} />
+              <PasswordInput value={form.password} onChange={(e) => update('password', e.target.value)} placeholder="Min. 8 characters" />
             </Field>
             <Field label="Confirm Password" error={errors.confirmPassword}>
-              <PasswordInput value={form.confirmPassword} onChange={(e) => update('confirmPassword', e.target.value)} aria-invalid={!!errors.confirmPassword} />
+              <PasswordInput value={form.confirmPassword} onChange={(e) => update('confirmPassword', e.target.value)} />
             </Field>
           </div>
         )}
 
-        {submitError && (
-          <div className="mt-4 rounded-md border border-crit-border bg-crit-bg px-3 py-2 text-sm text-crit-text">{submitError}</div>
-        )}
+        {submitError && <div className="mt-4 rounded-md border border-crit-border bg-crit-bg px-3 py-2 text-sm text-crit-text">{submitError}</div>}
 
         <div className="mt-6 flex items-center justify-end gap-3">
           <Button variant="outline" onClick={() => navigate('/users')}>Cancel</Button>
-          <Button onClick={handleSubmit} disabled={submitting || !isDirty}>
-            {submitting ? 'Saving…' : isEditing ? 'Save Changes' : 'Create User'}
-          </Button>
+          <Button onClick={handleSubmit} disabled={submitting || !isDirty}>{submitting ? 'Saving…' : isEditing ? 'Save Changes' : 'Create User'}</Button>
         </div>
       </Card>
     </section>

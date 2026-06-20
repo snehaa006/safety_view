@@ -1,54 +1,72 @@
-import { useState } from 'react';
-import { changePassword } from '@/services/api';
+import { useEffect, useState } from 'react';
+import { Plus, Trash2 } from 'lucide-react';
+import { changePassword, fetchAlertPreferences, setAlertPreferences } from '@/services/api';
 import { useAuth } from '@/context/AuthContext';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
 import { PasswordInput } from '@/components/ui/password-input';
-
-type Errors = { current?: string; next?: string; confirm?: string };
+import type { UserAlertPreference } from '@/types';
 
 export default function SettingsPage() {
   const { user } = useAuth();
+
+  // password
   const [current, setCurrent] = useState('');
   const [next, setNext] = useState('');
   const [confirm, setConfirm] = useState('');
-  const [errors, setErrors] = useState<Errors>({});
-  const [submitting, setSubmitting] = useState(false);
-  const [success, setSuccess] = useState('');
-  const [submitError, setSubmitError] = useState('');
+  const [pwErr, setPwErr] = useState('');
+  const [pwOk, setPwOk] = useState('');
+  const [pwBusy, setPwBusy] = useState(false);
 
-  function clearErr(key: keyof Errors) {
-    setErrors((prev) => (prev[key] ? { ...prev, [key]: undefined } : prev));
-    setSubmitError('');
-    setSuccess('');
-  }
+  // alert prefs
+  const [prefs, setPrefs] = useState<UserAlertPreference[]>([]);
+  const [prefBusy, setPrefBusy] = useState(false);
+  const [prefMsg, setPrefMsg] = useState('');
 
-  async function handleSubmit() {
-    const e: Errors = {};
-    if (!current) e.current = 'Enter your current password.';
-    if (next.length < 8) e.next = 'New password must be at least 8 characters.';
-    if (next !== confirm) e.confirm = 'Passwords do not match.';
-    setErrors(e);
-    if (Object.keys(e).length > 0) return;
+  useEffect(() => {
+    (async () => {
+      if (user?.id != null) setPrefs(await fetchAlertPreferences(user.id).catch(() => []));
+    })();
+  }, [user]);
 
+  async function submitPassword() {
+    setPwErr(''); setPwOk('');
+    if (!current) return setPwErr('Enter your current password.');
+    if (next.length < 8) return setPwErr('New password must be at least 8 characters.');
+    if (next !== confirm) return setPwErr('Passwords do not match.');
     if (!user) return;
     try {
-      setSubmitting(true);
+      setPwBusy(true);
       await changePassword(user.id, current, next);
-      setSuccess('Password changed successfully.');
-      setCurrent('');
-      setNext('');
-      setConfirm('');
-    } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : 'Failed to change password.');
-    } finally {
-      setSubmitting(false);
-    }
+      setPwOk('Password changed.'); setCurrent(''); setNext(''); setConfirm('');
+    } catch (err) { setPwErr(err instanceof Error ? err.message : 'Failed to change password.'); }
+    finally { setPwBusy(false); }
+  }
+
+  function addPref() {
+    setPrefs((p) => [...p, { alert_type: null, severity_level: null, channel: 'EMAIL', destination: '', is_enabled: true }]);
+  }
+  function setPref(i: number, patch: Partial<UserAlertPreference>) {
+    setPrefs((p) => p.map((x, idx) => (idx === i ? { ...x, ...patch } : x)));
+  }
+  function removePref(i: number) { setPrefs((p) => p.filter((_, idx) => idx !== i)); }
+
+  async function savePrefs() {
+    if (!user) return;
+    setPrefMsg('');
+    try {
+      setPrefBusy(true);
+      await setAlertPreferences(user.id, prefs);
+      setPrefMsg('Alert preferences saved.');
+    } catch (err) { setPrefMsg(err instanceof Error ? err.message : 'Failed to save preferences.'); }
+    finally { setPrefBusy(false); }
   }
 
   return (
-    <section className="mx-auto max-w-xl space-y-4">
+    <section className="mx-auto max-w-2xl space-y-4">
       <div>
         <h3 className="text-lg font-bold">Settings</h3>
         <p className="text-sm text-muted-foreground">Manage your account</p>
@@ -56,36 +74,38 @@ export default function SettingsPage() {
 
       <Card className="p-6">
         <h4 className="mb-4 font-semibold">Change Password</h4>
-
-        {success && (
-          <div className="mb-4 rounded-md border border-ok-border bg-ok-bg px-3 py-2 text-sm text-ok-text">{success}</div>
-        )}
-        {submitError && (
-          <div className="mb-4 rounded-md border border-crit-border bg-crit-bg px-3 py-2 text-sm text-crit-text">{submitError}</div>
-        )}
-
+        {pwOk && <div className="mb-4 rounded-md border border-ok-border bg-ok-bg px-3 py-2 text-sm text-ok-text">{pwOk}</div>}
+        {pwErr && <div className="mb-4 rounded-md border border-crit-border bg-crit-bg px-3 py-2 text-sm text-crit-text">{pwErr}</div>}
         <div className="flex flex-col gap-4">
-          <div className="flex flex-col gap-1.5">
-            <Label>Current Password</Label>
-            <PasswordInput value={current} onChange={(e) => { setCurrent(e.target.value); clearErr('current'); }} />
-            {errors.current && <span className="text-xs font-medium text-crit-text">{errors.current}</span>}
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label>New Password</Label>
-            <PasswordInput value={next} onChange={(e) => { setNext(e.target.value); clearErr('next'); }} placeholder="Min. 8 characters" />
-            {errors.next && <span className="text-xs font-medium text-crit-text">{errors.next}</span>}
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label>Confirm New Password</Label>
-            <PasswordInput value={confirm} onChange={(e) => { setConfirm(e.target.value); clearErr('confirm'); }} />
-            {errors.confirm && <span className="text-xs font-medium text-crit-text">{errors.confirm}</span>}
-          </div>
-          <div className="flex justify-end">
-            <Button onClick={handleSubmit} disabled={submitting}>
-              {submitting ? 'Saving…' : 'Change Password'}
-            </Button>
-          </div>
+          <div className="flex flex-col gap-1.5"><Label>Current Password</Label><PasswordInput value={current} onChange={(e) => setCurrent(e.target.value)} /></div>
+          <div className="flex flex-col gap-1.5"><Label>New Password</Label><PasswordInput value={next} onChange={(e) => setNext(e.target.value)} placeholder="Min. 8 characters" /></div>
+          <div className="flex flex-col gap-1.5"><Label>Confirm New Password</Label><PasswordInput value={confirm} onChange={(e) => setConfirm(e.target.value)} /></div>
+          <div className="flex justify-end"><Button onClick={submitPassword} disabled={pwBusy}>{pwBusy ? 'Saving…' : 'Change Password'}</Button></div>
         </div>
+      </Card>
+
+      <Card className="p-6">
+        <div className="mb-4 flex items-center justify-between">
+          <h4 className="font-semibold">Alert Preferences</h4>
+          <Button variant="outline" size="sm" onClick={addPref}><Plus className="h-4 w-4" /> Add rule</Button>
+        </div>
+        {prefMsg && <div className="mb-4 rounded-md border border-ok-border bg-ok-bg px-3 py-2 text-sm text-ok-text">{prefMsg}</div>}
+        {prefs.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No routing rules. Add one to receive alerts via email/SMS/etc.</p>
+        ) : (
+          <div className="flex flex-col gap-3">
+            {prefs.map((p, i) => (
+              <div key={i} className="grid grid-cols-1 items-end gap-2 rounded-md border border-border p-3 sm:grid-cols-[1fr_1fr_1fr_auto_auto]">
+                <div className="flex flex-col gap-1"><Label>Channel</Label><Input value={p.channel} onChange={(e) => setPref(i, { channel: e.target.value })} placeholder="EMAIL / SMS / PUSH" /></div>
+                <div className="flex flex-col gap-1"><Label>Destination</Label><Input value={p.destination} onChange={(e) => setPref(i, { destination: e.target.value })} placeholder="address / number" /></div>
+                <div className="flex flex-col gap-1"><Label>Severity</Label><Input value={p.severity_level || ''} onChange={(e) => setPref(i, { severity_level: e.target.value || null })} placeholder="any" /></div>
+                <label className="flex items-center gap-2 pb-2 text-sm"><Checkbox checked={p.is_enabled} onCheckedChange={(v) => setPref(i, { is_enabled: v === true })} /> On</label>
+                <Button variant="ghost" size="icon" onClick={() => removePref(i)}><Trash2 className="h-4 w-4 text-crit-text" /></Button>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="mt-4 flex justify-end"><Button onClick={savePrefs} disabled={prefBusy}>{prefBusy ? 'Saving…' : 'Save Preferences'}</Button></div>
       </Card>
     </section>
   );

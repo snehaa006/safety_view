@@ -1,62 +1,56 @@
 // ---------------------------------------------------------------------------
-// API service layer — Supabase (PostgreSQL via PostgREST)
+// API service layer — Fire Alarm Monitoring System (architecture v6)
 //
-// Matches SafetyView schema v4:
-//   groups → devices → zones (exactly 16 per device) → zone_status
-//   users get one or more devices via the user_devices join table (within
-//   their group); users.device_id is the primary device.
-//
-// Access rule (enforced here at the app layer):
-//   • ADMIN  → sees every device.
-//   • others → see exactly the devices assigned to them, falling back to their
-//     group, then their single device.
+// Groups → Buildings → Panels → Zones. Roles are M2M via user_roles.
+// Access is driven by user_buildings (soft-deleted). Super Admin sees all.
 // ---------------------------------------------------------------------------
 
 import { supabase } from './supabase';
 import type {
+  Alert,
   AuditLogEntry,
   AuthUser,
   Building,
   CreateUserInput,
-  Device,
-  DeviceHealth,
-  DeviceStatus,
   Group,
   Location,
+  LoginLog,
   LoginResult,
   ManagedUser,
+  ManualAction,
   Organization,
-  SafetyEvent,
+  Panel,
+  Role,
+  ScopeMetrics,
   TokenPayload,
   UpdateUserInput,
+  UserAlertPreference,
   Zone,
-  ZoneStatus,
-  ZoneSummary,
+  ZoneEvent,
 } from '@/types';
 
 const AUTH_TOKEN_KEY = 'fwd_auth_token';
 
-function isAdmin(role: string | undefined | null): boolean {
-  const r = (role || '').toUpperCase();
-  return r === 'ADMIN' || r === 'SUPER_ADMIN';
+function norm(s: string): string {
+  return (s || '').toUpperCase().replace(/[\s_-]+/g, '_');
+}
+
+function rolesAreAdmin(roles: string[] | undefined | null): boolean {
+  return (roles ?? []).some((r) => norm(r) === 'SUPER_ADMIN');
 }
 
 // ---------------------------------------------------------------------------
-// Audit logging
-//   The acting user is tracked in a module variable (set from AuthContext) so
-//   we don't have to thread it through every call. Writes go through the
-//   log_audit SECURITY DEFINER RPC; failures never break the main action.
+// Audit logging (audit_log.action enum: CREATE/UPDATE/DELETE/LOGIN/LOGOUT/LOGIN_FAILED)
 // ---------------------------------------------------------------------------
 
 let auditActorId: number | null = null;
-
 export function setAuditActor(id: number | null): void {
   auditActorId = id;
 }
 
 interface AuditOpts {
-  table?: string;
-  id?: number | null;
+  entity_type?: string;
+  entity_id?: number | null;
   old?: unknown;
   new?: unknown;
   description?: string;
@@ -65,10 +59,10 @@ interface AuditOpts {
 async function logAudit(action: string, opts: AuditOpts = {}): Promise<void> {
   try {
     await supabase.rpc('log_audit', {
-      p_performed_by: auditActorId,
+      p_user_id: auditActorId,
       p_action: action,
-      p_target_table: opts.table ?? null,
-      p_target_id: opts.id ?? null,
+      p_entity_type: opts.entity_type ?? null,
+      p_entity_id: opts.entity_id ?? null,
       p_old: opts.old ?? null,
       p_new: opts.new ?? null,
       p_description: opts.description ?? null,
@@ -78,85 +72,74 @@ async function logAudit(action: string, opts: AuditOpts = {}): Promise<void> {
   }
 }
 
-// Read device_ids explicitly assigned to a user via the user_devices join
-// table. Returns [] if the table doesn't exist yet (pre-migration).
-async function getUserDeviceIds(userId: number | null | undefined): Promise<number[]> {
-  if (userId == null) return [];
-  const { data, error } = await supabase
-    .from('user_devices')
-    .select('device_id')
-    .eq('user_id', userId);
-  if (error) return [];
-  return (data ?? []).map((r) => r.device_id).filter((x): x is number => x != null);
-}
-
 // ---------------------------------------------------------------------------
 // Auth
 // ---------------------------------------------------------------------------
+
+async function rolesForUser(userId: number): Promise<{ ids: number[]; names: string[] }> {
+  const { data } = await supabase
+    .from('user_roles')
+    .select('role_id, deleted_at, roles ( role_name )')
+    .eq('user_id', userId)
+    .is('deleted_at', null);
+  const ids: number[] = [];
+  const names: string[] = [];
+  for (const r of (data ?? []) as any[]) {
+    ids.push(r.role_id);
+    if (r.roles?.role_name) names.push(r.roles.role_name);
+  }
+  return { ids, names };
+}
 
 export async function login(username: string, password: string): Promise<LoginResult> {
   const { data, error } = await supabase.rpc('check_password', {
     p_username: username,
     p_password: password,
   });
-
   if (error) throw new Error(error.message);
   if (!data || data.length === 0) throw new Error('Invalid username or password');
 
-  // The check_password RPC may return columns either plain (id, username…)
-  // or OUT-prefixed (out_id, out_username…). Support both.
   const account = data[0] as Record<string, any>;
   const accId = account.out_id ?? account.id;
-  const accUsername = account.out_username ?? account.username;
-  const accRole = account.out_role ?? account.role;
-  const accEmail = account.out_email ?? account.email;
-  const accHier = account.out_hierarchy_level ?? account.hierarchy_level;
+  const accUsername = account.out_username ?? account.username ?? username;
+  const accEmail = account.out_email ?? account.email ?? null;
 
-  let profile: Record<string, unknown> = {};
-  const { data: profileRow } = await supabase
+  // Profile + roles
+  const { data: profile } = await supabase
     .from('users')
-    .select('id, username, email, role, device_id, group_id, building_id, location_id, organization_id, hierarchy_level, first_name, last_name')
+    .select('id, username, email, first_name, last_name, organization_id, parent_user_id')
     .eq('id', accId)
-    .single();
-  if (profileRow) profile = profileRow;
+    .maybeSingle();
+  const { names } = await rolesForUser(accId);
 
   const user: AuthUser = {
     id: accId,
-    username: accUsername,
-    role: (accRole ?? profile.role) as string,
-    email: (accEmail ?? profile.email) as string | null,
-    device_id: (profile.device_id as number | null) ?? null,
-    group_id: (profile.group_id as number | null) ?? null,
-    building_id: (profile.building_id as number | null) ?? null,
-    location_id: (profile.location_id as number | null) ?? null,
-    organization_id: (profile.organization_id as number | null) ?? null,
-    hierarchy_level: (accHier ?? profile.hierarchy_level ?? null) as number | null,
-    first_name: (profile.first_name as string | null) ?? null,
-    last_name: (profile.last_name as string | null) ?? null,
+    username: (profile as any)?.username ?? accUsername,
+    email: (profile as any)?.email ?? accEmail,
+    first_name: (profile as any)?.first_name ?? null,
+    last_name: (profile as any)?.last_name ?? null,
+    organization_id: (profile as any)?.organization_id ?? null,
+    parent_user_id: (profile as any)?.parent_user_id ?? null,
+    roles: names,
   };
 
   const payload: TokenPayload = {
     sub: user.username,
-    role: user.role,
     id: user.id,
-    device_id: user.device_id ?? null,
-    group_id: user.group_id ?? null,
-    building_id: user.building_id ?? null,
-    location_id: user.location_id ?? null,
+    roles: user.roles,
     organization_id: user.organization_id ?? null,
-    hierarchy_level: user.hierarchy_level ?? null,
     exp: Date.now() + 8 * 60 * 60 * 1000,
   };
-
   const token = `supabase.${btoa(JSON.stringify(payload))}.sig`;
   localStorage.setItem(AUTH_TOKEN_KEY, token);
   setAuditActor(user.id);
-  void logAudit('USER_LOGIN', { table: 'users', id: user.id, description: `Login: ${user.username}` });
+  void logAudit('LOGIN', { entity_type: 'users', entity_id: user.id, description: `Login: ${user.username}` });
+  void recordLoginLog(user.id);
   return { token, user };
 }
 
 export function logout(): void {
-  if (auditActorId != null) void logAudit('USER_LOGOUT', { table: 'users', id: auditActorId, description: 'Logout' });
+  if (auditActorId != null) void logAudit('LOGOUT', { entity_type: 'users', entity_id: auditActorId });
   setAuditActor(null);
   localStorage.removeItem(AUTH_TOKEN_KEY);
 }
@@ -173,296 +156,197 @@ export function decodeToken(token: string): TokenPayload | null {
   }
 }
 
+export async function changePassword(userId: number, oldPassword: string, newPassword: string): Promise<void> {
+  const { error } = await supabase.rpc('change_password', {
+    p_user_id: userId,
+    p_old_password: oldPassword,
+    p_new_password: newPassword,
+  });
+  if (error) throw new Error(error.message);
+  void logAudit('UPDATE', { entity_type: 'users', entity_id: userId, description: 'Password changed' });
+}
+
+async function recordLoginLog(userId: number): Promise<void> {
+  try {
+    await supabase.from('login_logs').insert({
+      user_id: userId,
+      was_successful: true,
+      browser: typeof navigator !== 'undefined' ? navigator.userAgent.slice(0, 120) : null,
+      user_agent: typeof navigator !== 'undefined' ? navigator.userAgent : null,
+    });
+  } catch {
+    /* login_logs may be RLS-restricted; ignore */
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Roles
+// ---------------------------------------------------------------------------
+
+export async function fetchRoles(): Promise<Role[]> {
+  const { data, error } = await supabase.from('roles').select('id, role_name, description').order('id');
+  if (error) throw new Error(error.message);
+  return (data ?? []) as Role[];
+}
+
+export async function createRole(input: { role_name: string; description?: string | null }): Promise<{ id: number }> {
+  const { data, error } = await supabase
+    .from('roles')
+    .insert({ role_name: input.role_name, description: input.description || null })
+    .select('id')
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  void logAudit('CREATE', { entity_type: 'roles', description: `Role ${input.role_name}` });
+  return data as { id: number };
+}
+
+export async function updateRole(id: number, fields: { role_name?: string; description?: string | null }): Promise<void> {
+  const { error } = await supabase.from('roles').update(fields).eq('id', id);
+  if (error) throw new Error(error.message);
+  void logAudit('UPDATE', { entity_type: 'roles', entity_id: id });
+}
+
+export async function deleteRole(id: number): Promise<void> {
+  const { error } = await supabase.from('roles').delete().eq('id', id);
+  if (error) throw new Error(error.message);
+  void logAudit('DELETE', { entity_type: 'roles', entity_id: id });
+}
+
+// ---------------------------------------------------------------------------
+// Organizations
+// ---------------------------------------------------------------------------
+
+export async function fetchOrganizations(): Promise<Organization[]> {
+  const { data, error } = await supabase
+    .from('organizations')
+    .select('id, organization_name, logo_path, is_active, created_at')
+    .order('organization_name');
+  if (error) throw new Error(error.message);
+  return (data ?? []) as Organization[];
+}
+
+export async function createOrganization(input: { organization_name: string; logo_path?: string | null; is_active?: boolean }): Promise<{ id: number }> {
+  const { data, error } = await supabase
+    .from('organizations')
+    .insert({ organization_name: input.organization_name, logo_path: input.logo_path || null, is_active: input.is_active ?? true })
+    .select('id')
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  void logAudit('CREATE', { entity_type: 'organizations', description: input.organization_name });
+  return data as { id: number };
+}
+
+export async function updateOrganization(id: number, fields: { organization_name?: string; logo_path?: string | null; is_active?: boolean }): Promise<void> {
+  const { error } = await supabase.from('organizations').update(fields).eq('id', id);
+  if (error) throw new Error(error.message);
+  void logAudit('UPDATE', { entity_type: 'organizations', entity_id: id });
+}
+
+export async function deleteOrganization(id: number): Promise<void> {
+  const { error } = await supabase.from('organizations').delete().eq('id', id);
+  if (error) throw new Error(error.message);
+  void logAudit('DELETE', { entity_type: 'organizations', entity_id: id });
+}
+
 // ---------------------------------------------------------------------------
 // Groups
 // ---------------------------------------------------------------------------
 
 export async function fetchGroups(): Promise<Group[]> {
-  const { data, error } = await supabase
-    .from('groups')
-    .select('id, group_name, description')
-    .order('group_name', { ascending: true });
-
+  const { data, error } = await supabase.from('groups').select('id, group_name, description').order('group_name');
   if (error) throw new Error(error.message);
   return (data ?? []) as Group[];
 }
 
-// ---------------------------------------------------------------------------
-// Hierarchy: which buildings a user can see ("downward visibility").
-//
-// Managers are assigned to a LOCATION (users.location_id). They automatically
-// see every building whose location is at or below their location in the
-// Country → State → District tree — no manual per-building assignment.
-//   • SUPER_ADMIN / ADMIN  → null (all)
-//   • NATIONAL/REGIONAL/DISTRICT MANAGER → buildings in their location subtree
-//   • SUPERVISOR           → buildings they supervise (buildings.supervisor_id)
-//   • BUILDING_OPERATOR / others → their single assigned building
-// ---------------------------------------------------------------------------
-
-const MANAGER_ROLES = new Set(['NATIONAL_MANAGER', 'REGIONAL_MANAGER', 'DISTRICT_MANAGER']);
-
-// All location ids at or below `rootId` (inclusive) in the parent_id tree.
-async function locationSubtreeIds(rootId: number): Promise<number[]> {
-  const { data } = await supabase.from('locations').select('id, parent_id');
-  const all = (data ?? []) as { id: number; parent_id: number | null }[];
-  const childrenOf: Record<number, number[]> = {};
-  for (const l of all) {
-    if (l.parent_id != null) (childrenOf[l.parent_id] ??= []).push(l.id);
-  }
-  const result: number[] = [];
-  const stack = [rootId];
-  while (stack.length) {
-    const cur = stack.pop()!;
-    result.push(cur);
-    for (const c of childrenOf[cur] ?? []) stack.push(c);
-  }
-  return result;
-}
-
-export async function visibleBuildingIds(user: AuthUser | null): Promise<number[] | null> {
-  if (isAdmin(user?.role)) return null; // all buildings
-  const role = (user?.role || '').toUpperCase();
-
-  if (MANAGER_ROLES.has(role)) {
-    if (user?.location_id == null) return [];
-    const locIds = await locationSubtreeIds(user.location_id);
-    if (locIds.length === 0) return [];
-    const { data, error } = await supabase.from('buildings').select('id').in('location_id', locIds);
-    if (error) return [];
-    return (data ?? []).map((r) => r.id);
-  }
-
-  if (role === 'SUPERVISOR' && user?.id != null) {
-    const { data } = await supabase.from('buildings').select('id').eq('supervisor_id', user.id);
-    return (data ?? []).map((r) => r.id);
-  }
-
-  if (user?.building_id != null) return [user.building_id];
-  return [];
-}
-
-// Find an existing location (by name + type + parent) or create it. Used by the
-// building form so a new Country/State/District is auto-added to `locations`.
-export async function resolveLocation(
-  name: string,
-  type: 'NATIONAL' | 'REGIONAL' | 'DISTRICT',
-  parentId: number | null
-): Promise<number | null> {
-  const clean = name.trim();
-  if (!clean) return null;
-  let q = supabase.from('locations').select('id').ilike('name', clean).eq('type', type);
-  q = parentId == null ? q.is('parent_id', null) : q.eq('parent_id', parentId);
-  const { data: existing } = await q.maybeSingle();
-  if (existing) return (existing as any).id;
+export async function createGroup(input: { group_name: string; description?: string | null }): Promise<{ id: number }> {
   const { data, error } = await supabase
-    .from('locations')
-    .insert({ name: clean, type, parent_id: parentId })
+    .from('groups')
+    .insert({ group_name: input.group_name, description: input.description || null })
     .select('id')
     .maybeSingle();
   if (error) throw new Error(error.message);
-  return (data as any)?.id ?? null;
-}
-
-// Resolve a full Country → State → District path, creating missing nodes.
-// Returns the District location id (the one a building points at).
-export async function resolveLocationPath(input: {
-  country: string;
-  state: string;
-  district: string;
-}): Promise<number | null> {
-  const countryId = await resolveLocation(input.country, 'NATIONAL', null);
-  if (countryId == null) return null;
-  const stateId = await resolveLocation(input.state, 'REGIONAL', countryId);
-  if (stateId == null) return countryId;
-  const districtId = await resolveLocation(input.district, 'DISTRICT', stateId);
-  return districtId ?? stateId;
-}
-
-// ---------------------------------------------------------------------------
-// Devices
-// ---------------------------------------------------------------------------
-
-export async function fetchDevices(user: AuthUser | null, buildingId?: number): Promise<Device[]> {
-  let allowedIds: number[] | null = null;
-  if (!isAdmin(user?.role)) {
-    const ids = new Set<number>();
-    for (const d of await getUserDeviceIds(user?.id)) ids.add(d);
-    if (user?.group_id != null) {
-      const { data: groupDevices } = await supabase.from('devices').select('id').eq('group_id', user.group_id);
-      for (const r of (groupDevices ?? []) as any[]) ids.add(r.id);
-    }
-    // Devices inside the buildings this user can see (hierarchy)
-    const bIds = await visibleBuildingIds(user);
-    if (bIds === null) {
-      // (admin handled above; non-admin won't hit this)
-    } else if (bIds.length > 0) {
-      const { data: bDevices } = await supabase.from('devices').select('id').in('building_id', bIds);
-      for (const r of (bDevices ?? []) as any[]) ids.add(r.id);
-    }
-    if (user?.device_id != null) ids.add(user.device_id);
-    if (ids.size === 0) return [];
-    allowedIds = Array.from(ids);
-  }
-
-  let query = supabase
-    .from('devices')
-    .select(`
-      id,
-      device_uuid,
-      device_remarks,
-      status,
-      health_status,
-      group_id,
-      building_id,
-      updated_at,
-      created_at,
-      groups ( group_name ),
-      buildings ( building_name )
-    `)
-    .order('id', { ascending: true });
-
-  if (allowedIds) query = query.in('id', allowedIds);
-  if (buildingId != null) query = query.eq('building_id', buildingId);
-
-  const { data: devices, error } = await query;
-  if (error) throw new Error(error.message);
-  if (!devices || devices.length === 0) return [];
-
-  const deviceIds = devices.map((d: any) => d.id);
-  const { data: zoneRows, error: zoneErr } = await supabase
-    .from('zones')
-    .select('device_id, zone_status ( status )')
-    .in('device_id', deviceIds);
-  if (zoneErr) throw new Error(zoneErr.message);
-
-  const summaryByDevice: Record<number, { totalZones: number; fireAlarms: number; faults: number }> = {};
-  for (const id of deviceIds) summaryByDevice[id] = { totalZones: 0, fireAlarms: 0, faults: 0 };
-  for (const z of (zoneRows ?? []) as any[]) {
-    const s = summaryByDevice[z.device_id];
-    if (!s) continue;
-    s.totalZones += 1;
-    const status = z.zone_status?.[0]?.status ?? z.zone_status?.status ?? 'NORMAL';
-    if (status === 'FIRE_ALARM') s.fireAlarms += 1;
-    else if (status === 'FAULT') s.faults += 1;
-  }
-
-  const assignedSet = new Set<number>();
-  const [{ data: udRows }, { data: primaryRows }] = await Promise.all([
-    supabase.from('user_devices').select('device_id').in('device_id', deviceIds),
-    supabase.from('users').select('device_id').in('device_id', deviceIds),
-  ]);
-  for (const r of (udRows ?? []) as any[]) if (r.device_id != null) assignedSet.add(r.device_id);
-  for (const r of (primaryRows ?? []) as any[]) if (r.device_id != null) assignedSet.add(r.device_id);
-
-  return (devices as any[]).map((d) => ({
-    id: d.id,
-    device_uuid: d.device_uuid,
-    device_remarks: d.device_remarks,
-    status: (assignedSet.has(d.id) ? 'ASSIGNED' : 'NOT_ASSIGNED') as DeviceStatus,
-    health_status: d.health_status ?? null,
-    group_id: d.group_id,
-    group_name: d.groups?.group_name ?? null,
-    building_id: d.building_id ?? null,
-    building_name: d.buildings?.building_name ?? null,
-    updated_at: d.updated_at,
-    created_at: d.created_at,
-    summary: summaryByDevice[d.id] ?? { totalZones: 0, fireAlarms: 0, faults: 0 },
-  }));
-}
-
-export async function createDevice(input: {
-  device_uuid: string;
-  device_remarks?: string;
-  group_id?: number | null;
-  building_id?: number | null;
-}): Promise<{ id: number; device_uuid: string }> {
-  const { data, error } = await supabase
-    .from('devices')
-    .insert({
-      device_uuid: input.device_uuid,
-      device_remarks: input.device_remarks || null,
-      group_id: input.group_id || null,
-      building_id: input.building_id || null,
-    })
-    .select('id, device_uuid')
-    .maybeSingle();
-
-  if (error) throw new Error(error.message);
-  const created = data as { id: number; device_uuid: string };
-  void logAudit('DEVICE_CREATED', { table: 'devices', id: created.id, new: input, description: `Device ${input.device_uuid} created` });
-  return created;
-}
-
-export async function updateDevice(
-  id: number,
-  fields: { device_remarks?: string; group_id?: number | null; building_id?: number | null }
-): Promise<{ id: number }> {
-  const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
-  if (fields.device_remarks !== undefined) patch.device_remarks = fields.device_remarks;
-  if (fields.group_id !== undefined) patch.group_id = fields.group_id || null;
-  if (fields.building_id !== undefined) patch.building_id = fields.building_id || null;
-
-  const { data, error } = await supabase
-    .from('devices')
-    .update(patch)
-    .eq('id', id)
-    .select('id')
-    .maybeSingle();
-
-  if (error) throw new Error(error.message);
-  void logAudit('DEVICE_UPDATED', { table: 'devices', id, new: fields });
+  void logAudit('CREATE', { entity_type: 'groups', description: input.group_name });
   return data as { id: number };
 }
 
-export async function deleteDevice(id: number): Promise<{ id: number }> {
-  const { error } = await supabase.from('devices').delete().eq('id', id);
+export async function updateGroup(id: number, fields: { group_name?: string; description?: string | null }): Promise<void> {
+  const { error } = await supabase.from('groups').update(fields).eq('id', id);
   if (error) throw new Error(error.message);
-  void logAudit('DEVICE_DELETED', { table: 'devices', id });
-  return { id };
+  void logAudit('UPDATE', { entity_type: 'groups', entity_id: id });
 }
 
-export interface DeviceInfo {
-  id: number;
-  device_uuid: string;
-  device_remarks: string | null;
-  status: DeviceStatus;
-  health_status: DeviceHealth | null;
-  group_id: number | null;
-  group_name: string | null;
+export async function deleteGroup(id: number): Promise<void> {
+  const { error } = await supabase.from('groups').delete().eq('id', id);
+  if (error) throw new Error(error.message);
+  void logAudit('DELETE', { entity_type: 'groups', entity_id: id });
 }
 
-export async function fetchDeviceById(id: number): Promise<DeviceInfo | null> {
+// ---------------------------------------------------------------------------
+// Locations
+// ---------------------------------------------------------------------------
+
+export async function fetchLocations(): Promise<Location[]> {
   const { data, error } = await supabase
-    .from('devices')
-    .select('id, device_uuid, device_remarks, status, health_status, group_id, groups ( group_name )')
-    .eq('id', id)
-    .maybeSingle();
-  if (error || !data) return null;
-  const d = data as any;
-  return {
-    id: d.id,
-    device_uuid: d.device_uuid,
-    device_remarks: d.device_remarks,
-    status: d.status,
-    health_status: d.health_status ?? null,
-    group_id: d.group_id,
-    group_name: d.groups?.group_name ?? null,
-  };
+    .from('locations')
+    .select('id, address, city, state, country, postal_code, latitude, longitude')
+    .order('id');
+  if (error) throw new Error(error.message);
+  return (data ?? []) as Location[];
+}
+
+type LocationInput = Omit<Location, 'id'>;
+
+export async function createLocation(input: LocationInput): Promise<{ id: number }> {
+  const { data, error } = await supabase.from('locations').insert(input).select('id').maybeSingle();
+  if (error) throw new Error(error.message);
+  void logAudit('CREATE', { entity_type: 'locations' });
+  return data as { id: number };
+}
+
+export async function updateLocation(id: number, fields: Partial<LocationInput>): Promise<void> {
+  const { error } = await supabase.from('locations').update(fields).eq('id', id);
+  if (error) throw new Error(error.message);
+  void logAudit('UPDATE', { entity_type: 'locations', entity_id: id });
+}
+
+export async function deleteLocation(id: number): Promise<void> {
+  const { error } = await supabase.from('locations').delete().eq('id', id);
+  if (error) throw new Error(error.message);
+  void logAudit('DELETE', { entity_type: 'locations', entity_id: id });
 }
 
 // ---------------------------------------------------------------------------
-// Buildings (hierarchy: building contains devices; managed up the chain)
+// Access (user_buildings) — drives visibility
 // ---------------------------------------------------------------------------
 
-const BUILDING_SELECT = `
-  id, building_name, address, location_id,
-  supervisor_id, district_manager_id, regional_manager_id, national_manager_id,
-  created_at, locations ( name )
-`;
+export async function visibleBuildingIds(user: AuthUser | null): Promise<number[] | null> {
+  if (rolesAreAdmin(user?.roles)) return null; // all
+  if (user?.id == null) return [];
+  const { data } = await supabase
+    .from('user_buildings')
+    .select('building_id, deleted_at')
+    .eq('user_id', user.id)
+    .is('deleted_at', null);
+  return (data ?? []).map((r) => r.building_id);
+}
+
+// ---------------------------------------------------------------------------
+// Buildings
+// ---------------------------------------------------------------------------
+
+const LOCATION_COLS = 'id, address, city, state, country, postal_code, latitude, longitude';
+
+function locationLabel(l: Location | null): string {
+  if (!l) return '—';
+  return [l.address, l.city, l.state, l.country].filter(Boolean).join(', ') || '—';
+}
 
 export async function fetchBuildings(user: AuthUser | null): Promise<Building[]> {
   const ids = await visibleBuildingIds(user);
-  let q = supabase.from('buildings').select(BUILDING_SELECT).order('building_name', { ascending: true });
+  let q = supabase
+    .from('buildings')
+    .select(`id, building_name, group_id, location_id, created_at, groups ( group_name ), locations ( ${LOCATION_COLS} )`)
+    .order('building_name');
   if (ids !== null) {
     if (ids.length === 0) return [];
     q = q.in('id', ids);
@@ -472,710 +356,570 @@ export async function fetchBuildings(user: AuthUser | null): Promise<Building[]>
   const buildings = (data ?? []) as any[];
   if (buildings.length === 0) return [];
 
-  // device health metrics per building
-  const bIds = buildings.map((b) => b.id);
-  const { data: devs } = await supabase.from('devices').select('building_id, health_status').in('building_id', bIds);
-  const metric: Record<number, { deviceCount: number; healthy: number; offline: number; connected: number }> = {};
-  for (const id of bIds) metric[id] = { deviceCount: 0, healthy: 0, offline: 0, connected: 0 };
-  for (const d of (devs ?? []) as any[]) {
-    const m = metric[d.building_id];
-    if (!m) continue;
-    m.deviceCount += 1;
-    m.connected += 1;
-    if (d.health_status === 'OFFLINE') m.offline += 1;
-    else if (d.health_status === 'HEALTHY' || d.health_status == null) m.healthy += 1;
+  const buildingIds = buildings.map((b) => b.id);
+  const { data: panels } = await supabase.from('panels').select('id, building_id').in('building_id', buildingIds);
+  const panelToBuilding: Record<number, number> = {};
+  const metric: Record<number, { panelCount: number; zoneCount: number; fire: number; fault: number }> = {};
+  for (const id of buildingIds) metric[id] = { panelCount: 0, zoneCount: 0, fire: 0, fault: 0 };
+  for (const p of (panels ?? []) as any[]) {
+    panelToBuilding[p.id] = p.building_id;
+    if (metric[p.building_id]) metric[p.building_id].panelCount += 1;
+  }
+  const panelIds = (panels ?? []).map((p: any) => p.id);
+  if (panelIds.length > 0) {
+    const { data: zones } = await supabase.from('zones').select('panel_id, current_state').in('panel_id', panelIds);
+    for (const z of (zones ?? []) as any[]) {
+      const bId = panelToBuilding[z.panel_id];
+      const m = metric[bId];
+      if (!m) continue;
+      m.zoneCount += 1;
+      if (z.current_state === 'FIRE') m.fire += 1;
+      else if (z.current_state === 'FAULT') m.fault += 1;
+    }
   }
 
   return buildings.map((b) => ({
     id: b.id,
     building_name: b.building_name,
-    address: b.address ?? null,
-    location_id: b.location_id ?? null,
-    location_name: b.locations?.name ?? null,
-    supervisor_id: b.supervisor_id ?? null,
-    district_manager_id: b.district_manager_id ?? null,
-    regional_manager_id: b.regional_manager_id ?? null,
-    national_manager_id: b.national_manager_id ?? null,
+    group_id: b.group_id,
+    group_name: b.groups?.group_name ?? null,
+    location_id: b.location_id,
+    location: b.locations ?? null,
     created_at: b.created_at ?? null,
     ...metric[b.id],
   }));
 }
 
 export async function fetchBuildingById(id: number): Promise<Building | null> {
-  const { data, error } = await supabase.from('buildings').select(BUILDING_SELECT).eq('id', id).maybeSingle();
+  const { data, error } = await supabase
+    .from('buildings')
+    .select(`id, building_name, group_id, location_id, created_at, groups ( group_name ), locations ( ${LOCATION_COLS} )`)
+    .eq('id', id)
+    .maybeSingle();
   if (error || !data) return null;
   const b = data as any;
   return {
     id: b.id,
     building_name: b.building_name,
-    address: b.address ?? null,
-    location_id: b.location_id ?? null,
-    location_name: b.locations?.name ?? null,
-    supervisor_id: b.supervisor_id ?? null,
-    district_manager_id: b.district_manager_id ?? null,
-    regional_manager_id: b.regional_manager_id ?? null,
-    national_manager_id: b.national_manager_id ?? null,
+    group_id: b.group_id,
+    group_name: b.groups?.group_name ?? null,
+    location_id: b.location_id,
+    location: b.locations ?? null,
     created_at: b.created_at ?? null,
-    deviceCount: 0,
-    healthy: 0,
-    offline: 0,
-    connected: 0,
+    panelCount: 0,
+    zoneCount: 0,
+    fire: 0,
+    fault: 0,
   };
 }
 
-export interface BuildingInput {
-  building_name: string;
-  address?: string | null;
-  location_id?: number | null;
-  supervisor_id?: number | null;
-  district_manager_id?: number | null;
-  regional_manager_id?: number | null;
-  national_manager_id?: number | null;
-}
-
-function buildingPatch(input: Partial<BuildingInput>): Record<string, unknown> {
-  const p: Record<string, unknown> = {};
-  if (input.building_name !== undefined) p.building_name = input.building_name;
-  if (input.address !== undefined) p.address = input.address || null;
-  if (input.location_id !== undefined) p.location_id = input.location_id || null;
-  if (input.supervisor_id !== undefined) p.supervisor_id = input.supervisor_id || null;
-  if (input.district_manager_id !== undefined) p.district_manager_id = input.district_manager_id || null;
-  if (input.regional_manager_id !== undefined) p.regional_manager_id = input.regional_manager_id || null;
-  if (input.national_manager_id !== undefined) p.national_manager_id = input.national_manager_id || null;
-  return p;
-}
-
-export async function createBuilding(input: BuildingInput): Promise<{ id: number }> {
-  const { data, error } = await supabase.from('buildings').insert(buildingPatch(input)).select('id').maybeSingle();
+export async function createBuilding(input: { building_name: string; group_id: number; location_id: number }): Promise<{ id: number }> {
+  const { data, error } = await supabase.from('buildings').insert(input).select('id').maybeSingle();
   if (error) throw new Error(error.message);
-  const created = data as { id: number };
-  void logAudit('BUILDING_CREATED', { table: 'buildings', id: created.id, new: input, description: `Building ${input.building_name} created` });
-  return created;
-}
-
-export async function updateBuilding(id: number, input: Partial<BuildingInput>): Promise<{ id: number }> {
-  const { data, error } = await supabase.from('buildings').update(buildingPatch(input)).eq('id', id).select('id').maybeSingle();
-  if (error) throw new Error(error.message);
-  void logAudit('BUILDING_UPDATED', { table: 'buildings', id, new: input });
+  void logAudit('CREATE', { entity_type: 'buildings', description: input.building_name });
   return data as { id: number };
 }
 
-export async function deleteBuilding(id: number): Promise<{ id: number }> {
+export async function updateBuilding(id: number, fields: { building_name?: string; group_id?: number; location_id?: number }): Promise<void> {
+  const { error } = await supabase.from('buildings').update(fields).eq('id', id);
+  if (error) throw new Error(error.message);
+  void logAudit('UPDATE', { entity_type: 'buildings', entity_id: id });
+}
+
+export async function deleteBuilding(id: number): Promise<void> {
   const { error } = await supabase.from('buildings').delete().eq('id', id);
   if (error) throw new Error(error.message);
-  void logAudit('BUILDING_DELETED', { table: 'buildings', id });
-  return { id };
+  void logAudit('DELETE', { entity_type: 'buildings', entity_id: id });
 }
+
+export { locationLabel };
 
 // ---------------------------------------------------------------------------
-// Organizations (admin)
+// Panels
 // ---------------------------------------------------------------------------
 
-export async function fetchOrganizations(): Promise<Organization[]> {
-  const { data, error } = await supabase
-    .from('organizations')
-    .select('id, organization_name, logo_path, is_active, created_at')
-    .order('organization_name', { ascending: true });
-  if (error) throw new Error(error.message);
-  return (data ?? []) as Organization[];
-}
-
-export async function createOrganization(input: {
-  organization_name: string;
-  logo_path?: string | null;
-  is_active?: boolean;
-}): Promise<{ id: number }> {
-  const { data, error } = await supabase
-    .from('organizations')
-    .insert({
-      organization_name: input.organization_name,
-      logo_path: input.logo_path || null,
-      is_active: input.is_active ?? true,
-    })
-    .select('id')
-    .single();
-  if (error) throw new Error(error.message);
-  const created = data as { id: number };
-  void logAudit('ORG_CREATED', { table: 'organizations', id: created.id, new: input, description: `Organization ${input.organization_name} created` });
-  return created;
-}
-
-export async function updateOrganization(
-  id: number,
-  fields: { organization_name?: string; logo_path?: string | null; is_active?: boolean }
-): Promise<{ id: number }> {
-  const patch: Record<string, unknown> = {};
-  if (fields.organization_name !== undefined) patch.organization_name = fields.organization_name;
-  if (fields.logo_path !== undefined) patch.logo_path = fields.logo_path || null;
-  if (fields.is_active !== undefined) patch.is_active = fields.is_active;
-  const { data, error } = await supabase
-    .from('organizations')
-    .update(patch)
-    .eq('id', id)
-    .select('id')
-    .single();
-  if (error) throw new Error(error.message);
-  void logAudit('ORG_UPDATED', { table: 'organizations', id, new: fields });
-  return data as { id: number };
-}
-
-export async function deleteOrganization(id: number): Promise<{ id: number }> {
-  const { error } = await supabase.from('organizations').delete().eq('id', id);
-  if (error) throw new Error(error.message);
-  void logAudit('ORG_DELETED', { table: 'organizations', id });
-  return { id };
-}
-
-// ---------------------------------------------------------------------------
-// Groups (admin CRUD)
-// ---------------------------------------------------------------------------
-
-export async function createGroup(input: {
-  group_name: string;
-  description?: string | null;
-}): Promise<{ id: number }> {
-  const { data, error } = await supabase
-    .from('groups')
-    .insert({ group_name: input.group_name, description: input.description || null })
-    .select('id')
-    .single();
-  if (error) throw new Error(error.message);
-  const created = data as { id: number };
-  void logAudit('GROUP_CREATED', { table: 'groups', id: created.id, new: input, description: `Group ${input.group_name} created` });
-  return created;
-}
-
-export async function updateGroup(
-  id: number,
-  fields: { group_name?: string; description?: string | null }
-): Promise<{ id: number }> {
-  const patch: Record<string, unknown> = {};
-  if (fields.group_name !== undefined) patch.group_name = fields.group_name;
-  if (fields.description !== undefined) patch.description = fields.description || null;
-  const { data, error } = await supabase
-    .from('groups')
-    .update(patch)
-    .eq('id', id)
-    .select('id')
-    .single();
-  if (error) throw new Error(error.message);
-  void logAudit('GROUP_UPDATED', { table: 'groups', id, new: fields });
-  return data as { id: number };
-}
-
-export async function deleteGroup(id: number): Promise<{ id: number }> {
-  const { error } = await supabase.from('groups').delete().eq('id', id);
-  if (error) throw new Error(error.message);
-  void logAudit('GROUP_DELETED', { table: 'groups', id });
-  return { id };
-}
-
-// ---------------------------------------------------------------------------
-// Change own password (calls the change_password RPC)
-// ---------------------------------------------------------------------------
-
-export async function changePassword(
-  userId: number,
-  oldPassword: string,
-  newPassword: string
-): Promise<void> {
-  const { error } = await supabase.rpc('change_password', {
-    p_user_id: userId,
-    p_old_password: oldPassword,
-    p_new_password: newPassword,
-  });
-  if (error) throw new Error(error.message);
-  void logAudit('PASSWORD_CHANGED', { table: 'users', id: userId, description: 'Password changed' });
-}
-
-// ---------------------------------------------------------------------------
-// Zones for a device
-// ---------------------------------------------------------------------------
-
-export async function fetchZonesByDevice(deviceId: number): Promise<Zone[]> {
-  const { data: zonesData, error: zonesError } = await supabase
-    .from('zones')
-    .select(`
-      id,
-      device_id,
-      zone_number,
-      zone_name,
-      floor_name,
-      zone_status (
-        status,
-        water_level_pct,
-        line_pressure_bar,
-        updated_at
-      )
-    `)
-    .eq('device_id', deviceId)
-    .order('zone_number', { ascending: true });
-
-  if (zonesError) throw new Error(zonesError.message);
-  if (!zonesData || zonesData.length === 0) return [];
-
-  const { data: readings, error: readingsError } = await supabase
-    .from('sensor_readings')
-    .select(
-      'zone_id, temperature, smoke_index, fire_detected, fault_detected, battery_level, power_status, communication_status, created_at'
-    )
-    .in('zone_id', (zonesData as any[]).map((z) => z.id))
-    .order('created_at', { ascending: false });
-
-  if (readingsError) throw new Error(readingsError.message);
-
-  const latestReadingByZone: Record<number, any> = {};
-  for (const r of (readings ?? []) as any[]) {
-    if (!latestReadingByZone[r.zone_id]) latestReadingByZone[r.zone_id] = r;
+async function panelMetrics(panelIds: number[]): Promise<Record<number, { zoneCount: number; fire: number; fault: number }>> {
+  const metric: Record<number, { zoneCount: number; fire: number; fault: number }> = {};
+  for (const id of panelIds) metric[id] = { zoneCount: 0, fire: 0, fault: 0 };
+  if (panelIds.length === 0) return metric;
+  const { data: zones } = await supabase.from('zones').select('panel_id, current_state').in('panel_id', panelIds);
+  for (const z of (zones ?? []) as any[]) {
+    const m = metric[z.panel_id];
+    if (!m) continue;
+    m.zoneCount += 1;
+    if (z.current_state === 'FIRE') m.fire += 1;
+    else if (z.current_state === 'FAULT') m.fault += 1;
   }
-
-  return (zonesData as any[]).map((z) => {
-    const snap = z.zone_status?.[0] ?? z.zone_status ?? {};
-    const reading = latestReadingByZone[z.id] ?? {};
-
-    const fire: boolean = reading.fire_detected ?? false;
-    const fault: boolean = reading.fault_detected ?? false;
-    const commStatus: string = reading.communication_status ?? 'ONLINE';
-
-    let status: ZoneStatus = (snap.status ?? 'NORMAL') as ZoneStatus;
-    if ((status as string) === 'FIRE_ALARM') status = 'ALARM';
-    else if (status === 'NORMAL' && commStatus === 'OFFLINE') status = 'OFFLINE';
-
-    return {
-      id: z.id,
-      device_id: z.device_id,
-      zone_number: z.zone_number,
-      zone_name: z.zone_name,
-      floor_name: z.floor_name,
-      status,
-      sensors: {
-        waterLevel: parseFloat(snap.water_level_pct ?? 0),
-        pressure: parseFloat(snap.line_pressure_bar ?? 0),
-        fire,
-        fault,
-        temperature: parseFloat(reading.temperature ?? 0),
-        smokeLevel: reading.smoke_index ?? 0,
-        batteryLevel: reading.battery_level ?? 100,
-        powerStatus: reading.power_status ?? 'ON',
-        communicationStatus: commStatus,
-      },
-      lastUpdated: snap.updated_at ?? reading.created_at ?? new Date().toISOString(),
-    };
-  });
+  return metric;
 }
 
-// ---------------------------------------------------------------------------
-// Events for a device
-// ---------------------------------------------------------------------------
-
-export async function fetchEventsByDevice(deviceId: number): Promise<SafetyEvent[]> {
+export async function fetchPanelsByBuilding(buildingId: number): Promise<Panel[]> {
   const { data, error } = await supabase
-    .from('events')
-    .select(`
-      id,
-      device_id,
-      zone_id,
-      event_type,
-      severity,
-      title,
-      message,
-      is_acknowledged,
-      created_at,
-      zones ( zone_name )
-    `)
-    .eq('device_id', deviceId)
-    .order('created_at', { ascending: false })
-    .limit(20);
-
+    .from('panels')
+    .select('id, building_id, panel_code, panel_name, status, notes, last_seen, buildings ( building_name )')
+    .eq('building_id', buildingId)
+    .order('panel_code');
   if (error) throw new Error(error.message);
-
-  return ((data ?? []) as any[]).map((e) => ({
-    id: e.id,
-    device_id: e.device_id,
-    zone_id: e.zone_id,
-    zone_name: e.zones?.zone_name ?? `Zone ${e.zone_id}`,
-    event_type: e.event_type,
-    severity: e.severity,
-    message: e.message ?? e.title,
-    is_acknowledged: e.is_acknowledged,
-    created_at: e.created_at,
+  const panels = (data ?? []) as any[];
+  const metric = await panelMetrics(panels.map((p) => p.id));
+  return panels.map((p) => ({
+    id: p.id,
+    building_id: p.building_id,
+    building_name: p.buildings?.building_name ?? null,
+    panel_code: p.panel_code,
+    panel_name: p.panel_name ?? null,
+    status: p.status,
+    notes: p.notes ?? null,
+    last_seen: p.last_seen ?? null,
+    ...metric[p.id],
   }));
 }
 
-export async function acknowledgeEvent(eventId: number): Promise<{ id: number; is_acknowledged: boolean }> {
-  // Set acknowledged_by so the DB audit trigger records who acknowledged it.
+export async function fetchAllPanels(): Promise<Panel[]> {
   const { data, error } = await supabase
-    .from('events')
-    .update({
-      is_acknowledged: true,
-      acknowledged_at: new Date().toISOString(),
-      acknowledged_by: auditActorId,
-    })
-    .eq('id', eventId)
-    .select('id, is_acknowledged')
-    .maybeSingle();
-
+    .from('panels')
+    .select('id, building_id, panel_code, panel_name, status, notes, last_seen, buildings ( building_name )')
+    .order('panel_code');
   if (error) throw new Error(error.message);
-  return data as { id: number; is_acknowledged: boolean };
+  const panels = (data ?? []) as any[];
+  const metric = await panelMetrics(panels.map((p) => p.id));
+  return panels.map((p) => ({
+    id: p.id,
+    building_id: p.building_id,
+    building_name: p.buildings?.building_name ?? null,
+    panel_code: p.panel_code,
+    panel_name: p.panel_name ?? null,
+    status: p.status,
+    notes: p.notes ?? null,
+    last_seen: p.last_seen ?? null,
+    ...metric[p.id],
+  }));
+}
+
+export async function fetchPanelById(id: number): Promise<Panel | null> {
+  const { data, error } = await supabase
+    .from('panels')
+    .select('id, building_id, panel_code, panel_name, status, notes, last_seen, buildings ( building_name )')
+    .eq('id', id)
+    .maybeSingle();
+  if (error || !data) return null;
+  const p = data as any;
+  return {
+    id: p.id,
+    building_id: p.building_id,
+    building_name: p.buildings?.building_name ?? null,
+    panel_code: p.panel_code,
+    panel_name: p.panel_name ?? null,
+    status: p.status,
+    notes: p.notes ?? null,
+    last_seen: p.last_seen ?? null,
+    zoneCount: 0,
+    fire: 0,
+    fault: 0,
+  };
+}
+
+export async function createPanel(input: { building_id: number; panel_code: string; panel_name?: string | null; status?: string; notes?: string | null }): Promise<{ id: number }> {
+  const { data, error } = await supabase
+    .from('panels')
+    .insert({
+      building_id: input.building_id,
+      panel_code: input.panel_code,
+      panel_name: input.panel_name || null,
+      status: input.status || 'NORMAL',
+      notes: input.notes || null,
+    })
+    .select('id')
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  void logAudit('CREATE', { entity_type: 'panels', description: input.panel_code });
+  return data as { id: number };
+}
+
+export async function updatePanel(id: number, fields: { panel_code?: string; panel_name?: string | null; status?: string; notes?: string | null; building_id?: number }): Promise<void> {
+  const { error } = await supabase.from('panels').update(fields).eq('id', id);
+  if (error) throw new Error(error.message);
+  void logAudit('UPDATE', { entity_type: 'panels', entity_id: id });
+}
+
+export async function deletePanel(id: number): Promise<void> {
+  const { error } = await supabase.from('panels').delete().eq('id', id);
+  if (error) throw new Error(error.message);
+  void logAudit('DELETE', { entity_type: 'panels', entity_id: id });
 }
 
 // ---------------------------------------------------------------------------
-// Summary
+// Zones
 // ---------------------------------------------------------------------------
 
-export function summariseZones(zones: Zone[]): ZoneSummary {
-  const totalZones = zones.length;
-  if (totalZones === 0) {
-    return { totalZones: 0, fireAlarms: 0, faults: 0, offline: 0, avgWaterLevel: 0, avgPressure: 0 };
+export async function fetchZonesByPanel(panelId: number): Promise<Zone[]> {
+  const { data, error } = await supabase
+    .from('zones')
+    .select('id, panel_id, zone_number, zone_name, zone_type, current_state, current_reading, available_actions, updated_at')
+    .eq('panel_id', panelId)
+    .order('zone_number');
+  if (error) throw new Error(error.message);
+  return ((data ?? []) as any[]).map((z) => ({
+    id: z.id,
+    panel_id: z.panel_id,
+    zone_number: z.zone_number,
+    zone_name: z.zone_name,
+    zone_type: z.zone_type,
+    current_state: z.current_state,
+    current_reading: z.current_reading ?? null,
+    available_actions: (z.available_actions ?? []) as ManualAction[],
+    updated_at: z.updated_at ?? null,
+  }));
+}
+
+// User triggers a manual action → record an action_log (panel executes via backend).
+export async function performZoneAction(zoneId: number, action: ManualAction): Promise<void> {
+  if (auditActorId == null) throw new Error('Not authenticated');
+  const { error } = await supabase.from('action_logs').insert({ user_id: auditActorId, zone_id: zoneId, action });
+  if (error) throw new Error(error.message);
+}
+
+export async function fetchZoneEvents(panelId: number, limit = 30): Promise<ZoneEvent[]> {
+  const { data: zoneRows } = await supabase.from('zones').select('id, zone_name').eq('panel_id', panelId);
+  const zoneMap: Record<number, string> = {};
+  const zoneIds = ((zoneRows ?? []) as any[]).map((z) => {
+    zoneMap[z.id] = z.zone_name;
+    return z.id;
+  });
+  if (zoneIds.length === 0) return [];
+  const { data, error } = await supabase
+    .from('zone_events')
+    .select('id, zone_id, previous_state, new_state, created_at')
+    .in('zone_id', zoneIds)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (error) throw new Error(error.message);
+  return ((data ?? []) as any[]).map((e) => ({ ...e, zone_name: zoneMap[e.zone_id] ?? `Zone ${e.zone_id}` }));
+}
+
+export async function fetchActionLogs(panelId: number, limit = 30): Promise<import('@/types').ActionLogEntry[]> {
+  const { data: zoneRows } = await supabase.from('zones').select('id, zone_name').eq('panel_id', panelId);
+  const zoneMap: Record<number, string> = {};
+  const zoneIds = ((zoneRows ?? []) as any[]).map((z) => {
+    zoneMap[z.id] = z.zone_name;
+    return z.id;
+  });
+  if (zoneIds.length === 0) return [];
+  const { data, error } = await supabase
+    .from('action_logs')
+    .select('id, user_id, zone_id, action, created_at, users ( username )')
+    .in('zone_id', zoneIds)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (error) throw new Error(error.message);
+  return ((data ?? []) as any[]).map((a) => ({
+    id: a.id,
+    user_id: a.user_id,
+    username: a.users?.username ?? null,
+    zone_id: a.zone_id,
+    zone_name: zoneMap[a.zone_id] ?? `Zone ${a.zone_id}`,
+    action: a.action,
+    created_at: a.created_at,
+  }));
+}
+
+// ---------------------------------------------------------------------------
+// Alerts
+// ---------------------------------------------------------------------------
+
+export async function fetchAlerts(user: AuthUser | null, limit = 100): Promise<Alert[]> {
+  const ids = await visibleBuildingIds(user);
+  let q = supabase
+    .from('alerts')
+    .select('id, zone_event_id, building_id, zone_id, type, severity, created_at, buildings ( building_name ), zones ( zone_name )')
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (ids !== null) {
+    if (ids.length === 0) return [];
+    q = q.in('building_id', ids);
   }
-  const fireAlarms = zones.filter((z) => z.sensors.fire || z.status === 'ALARM').length;
-  const faults = zones.filter((z) => z.sensors.fault || z.status === 'FAULT').length;
-  const offline = zones.filter((z) => z.sensors.communicationStatus === 'OFFLINE').length;
-  const avgWaterLevel = Math.round(zones.reduce((s, z) => s + z.sensors.waterLevel, 0) / totalZones);
-  const avgPressure =
-    Math.round((zones.reduce((s, z) => s + z.sensors.pressure, 0) / totalZones) * 100) / 100;
-
-  return { totalZones, fireAlarms, faults, offline, avgWaterLevel, avgPressure };
+  const { data, error } = await q;
+  if (error) throw new Error(error.message);
+  return ((data ?? []) as any[]).map((a) => ({
+    id: a.id,
+    zone_event_id: a.zone_event_id,
+    building_id: a.building_id,
+    building_name: a.buildings?.building_name ?? null,
+    zone_id: a.zone_id,
+    zone_name: a.zones?.zone_name ?? null,
+    type: a.type,
+    severity: a.severity,
+    created_at: a.created_at,
+  }));
 }
 
 // ---------------------------------------------------------------------------
-// User Management (admin only)
+// Scope metrics (dashboard overview)
 // ---------------------------------------------------------------------------
 
-const USER_SELECT = `
-  id, username, email, role, is_active, created_at, updated_at, last_login,
-  first_name, last_name, mobile_no, customer_id, org_name,
-  organization_id, hierarchy_level, parent_user_id, device_type,
-  remarks, alert_email_enabled,
-  device_id, group_id, building_id, location_id,
-  devices!device_id ( device_uuid ),
-  groups ( group_name ),
-  organizations ( organization_name, logo_path )
+export function summariseBuildings(buildings: Building[]): ScopeMetrics {
+  return buildings.reduce<ScopeMetrics>(
+    (acc, b) => ({
+      buildings: acc.buildings + 1,
+      panels: acc.panels + b.panelCount,
+      zones: acc.zones + b.zoneCount,
+      fire: acc.fire + b.fire,
+      fault: acc.fault + b.fault,
+      isolation: acc.isolation,
+    }),
+    { buildings: 0, panels: 0, zones: 0, fire: 0, fault: 0, isolation: 0 }
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Users
+// ---------------------------------------------------------------------------
+
+const USER_COLS = `
+  id, username, email, first_name, last_name, mobile_no, profile_photo_path,
+  remarks, is_active, last_login, created_at, updated_at,
+  organization_id, parent_user_id,
+  organizations ( organization_name )
 `;
+
+export async function fetchUsers(): Promise<ManagedUser[]> {
+  const { data, error } = await supabase.from('users').select(USER_COLS).order('created_at', { ascending: false });
+  if (error) throw new Error(error.message);
+  const users = (data ?? []) as any[];
+
+  const usernameById: Record<number, string> = {};
+  for (const u of users) usernameById[u.id] = u.username;
+
+  // roles per user
+  const rolesByUser: Record<number, { ids: number[]; names: string[] }> = {};
+  const { data: urRows } = await supabase
+    .from('user_roles')
+    .select('user_id, role_id, deleted_at, roles ( role_name )')
+    .is('deleted_at', null);
+  for (const r of (urRows ?? []) as any[]) {
+    (rolesByUser[r.user_id] ??= { ids: [], names: [] }).ids.push(r.role_id);
+    if (r.roles?.role_name) rolesByUser[r.user_id].names.push(r.roles.role_name);
+  }
+
+  // buildings per user
+  const buildingsByUser: Record<number, number[]> = {};
+  const { data: ubRows } = await supabase
+    .from('user_buildings')
+    .select('user_id, building_id, deleted_at')
+    .is('deleted_at', null);
+  for (const r of (ubRows ?? []) as any[]) (buildingsByUser[r.user_id] ??= []).push(r.building_id);
+
+  return users.map((u) => normaliseUser(u, rolesByUser[u.id], buildingsByUser[u.id], usernameById));
+}
 
 function normaliseUser(
   u: any,
-  assigned: { id: number; uuid: string | null }[],
-  alertEmails: string[] = [],
-  buildingName: string | null = null,
-  locationName: string | null = null
+  roles: { ids: number[]; names: string[] } | undefined,
+  buildingIds: number[] | undefined,
+  usernameById: Record<number, string>
 ): ManagedUser {
   return {
     id: u.id,
     username: u.username,
     email: u.email ?? null,
-    role: u.role,
-    is_active: u.is_active,
-    created_at: u.created_at,
-    updated_at: u.updated_at ?? null,
-    last_login: u.last_login ?? null,
     first_name: u.first_name ?? null,
     last_name: u.last_name ?? null,
     mobile_no: u.mobile_no ?? null,
-    customer_id: u.customer_id ?? null,
-    org_name: u.org_name ?? null,
+    profile_photo_path: u.profile_photo_path ?? null,
+    remarks: u.remarks ?? null,
+    is_active: u.is_active,
+    last_login: u.last_login ?? null,
+    created_at: u.created_at,
+    updated_at: u.updated_at ?? null,
     organization_id: u.organization_id ?? null,
     organization_name: u.organizations?.organization_name ?? null,
-    organization_logo: u.organizations?.logo_path ?? null,
-    hierarchy_level: u.hierarchy_level ?? null,
     parent_user_id: u.parent_user_id ?? null,
-    device_type: u.device_type ?? null,
-    remarks: u.remarks ?? null,
-    alert_email_enabled: u.alert_email_enabled ?? null,
-    alert_emails: alertEmails,
-    device_id: u.device_id ?? null,
-    group_id: u.group_id ?? null,
-    building_id: u.building_id ?? null,
-    location_id: u.location_id ?? null,
-    device_uuid: u.devices?.device_uuid ?? null,
-    group_name: u.groups?.group_name ?? null,
-    building_name: buildingName,
-    location_name: locationName,
-    assigned_device_ids: assigned.map((d) => d.id),
-    assigned_device_uuids: assigned.map((d) => d.uuid).filter((x): x is string => !!x),
+    parent_username: u.parent_user_id != null ? usernameById[u.parent_user_id] ?? null : null,
+    roles: roles?.names ?? [],
+    role_ids: roles?.ids ?? [],
+    building_ids: buildingIds ?? [],
   };
 }
 
-async function alertEmailsByUser(): Promise<Record<number, string[]>> {
-  const byUser: Record<number, string[]> = {};
-  const { data } = await supabase.from('user_alert_emails').select('user_id, email');
-  for (const r of (data ?? []) as any[]) {
-    (byUser[r.user_id] ??= []).push(r.email);
-  }
-  return byUser;
-}
-
-async function buildingNameMap(): Promise<Record<number, string>> {
-  const map: Record<number, string> = {};
-  const { data } = await supabase.from('buildings').select('id, building_name');
-  for (const r of (data ?? []) as any[]) map[r.id] = r.building_name;
-  return map;
-}
-
-async function locationNameMap(): Promise<Record<number, string>> {
-  const map: Record<number, string> = {};
-  const { data } = await supabase.from('locations').select('id, name');
-  for (const r of (data ?? []) as any[]) map[r.id] = r.name;
-  return map;
-}
-
-export async function fetchUsers(): Promise<ManagedUser[]> {
-  const { data, error } = await supabase
-    .from('users')
-    .select(USER_SELECT)
-    .order('created_at', { ascending: false });
-
-  if (error) throw new Error(error.message);
-
-  const byUser: Record<number, { id: number; uuid: string | null }[]> = {};
-  const { data: udRows } = await supabase
-    .from('user_devices')
-    .select('user_id, device_id, devices ( device_uuid )');
-  for (const r of (udRows ?? []) as any[]) {
-    (byUser[r.user_id] ??= []).push({ id: r.device_id, uuid: r.devices?.device_uuid ?? null });
-  }
-
-  const emails = await alertEmailsByUser();
-  const bNames = await buildingNameMap();
-  const lNames = await locationNameMap();
-
-  return ((data ?? []) as any[]).map((u) =>
-    normaliseUser(
-      u,
-      byUser[u.id] ?? [],
-      emails[u.id] ?? [],
-      u.building_id ? bNames[u.building_id] ?? null : null,
-      u.location_id ? lNames[u.location_id] ?? null : null
-    )
-  );
-}
-
-export async function fetchUserById(userId: number): Promise<ManagedUser | null> {
-  const { data, error } = await supabase
-    .from('users')
-    .select(USER_SELECT)
-    .eq('id', userId)
-    .maybeSingle();
+export async function fetchUserById(id: number): Promise<ManagedUser | null> {
+  const { data, error } = await supabase.from('users').select(USER_COLS).eq('id', id).maybeSingle();
   if (error || !data) return null;
-
-  const { data: udRows } = await supabase
-    .from('user_devices')
-    .select('device_id, devices ( device_uuid )')
-    .eq('user_id', userId);
-  const assigned = ((udRows ?? []) as any[]).map((r) => ({
-    id: r.device_id,
-    uuid: r.devices?.device_uuid ?? null,
-  }));
-
-  const { data: emailRows } = await supabase
-    .from('user_alert_emails')
-    .select('email')
-    .eq('user_id', userId);
-  const alertEmails = ((emailRows ?? []) as any[]).map((r) => r.email);
-
-  let buildingName: string | null = null;
-  if ((data as any).building_id) {
-    const { data: b } = await supabase
-      .from('buildings')
-      .select('building_name')
-      .eq('id', (data as any).building_id)
-      .maybeSingle();
-    buildingName = (b as any)?.building_name ?? null;
+  const { data: urRows } = await supabase
+    .from('user_roles')
+    .select('role_id, deleted_at, roles ( role_name )')
+    .eq('user_id', id)
+    .is('deleted_at', null);
+  const roles = { ids: [] as number[], names: [] as string[] };
+  for (const r of (urRows ?? []) as any[]) {
+    roles.ids.push(r.role_id);
+    if (r.roles?.role_name) roles.names.push(r.roles.role_name);
   }
+  const { data: ubRows } = await supabase
+    .from('user_buildings')
+    .select('building_id, deleted_at')
+    .eq('user_id', id)
+    .is('deleted_at', null);
+  const buildingIds = ((ubRows ?? []) as any[]).map((r) => r.building_id);
 
-  let locationName: string | null = null;
-  if ((data as any).location_id) {
-    const { data: l } = await supabase
-      .from('locations')
-      .select('name')
-      .eq('id', (data as any).location_id)
-      .maybeSingle();
-    locationName = (l as any)?.name ?? null;
+  let parentUsername: string | null = null;
+  if ((data as any).parent_user_id != null) {
+    const { data: p } = await supabase.from('users').select('username').eq('id', (data as any).parent_user_id).maybeSingle();
+    parentUsername = (p as any)?.username ?? null;
   }
+  const u = data as any;
+  const m = normaliseUser(u, roles, buildingIds, {});
+  m.parent_username = parentUsername;
+  return m;
+}
 
-  return normaliseUser(data, assigned, alertEmails, buildingName, locationName);
+// Soft-delete current rows, (re)insert the new set.
+export async function setUserRoles(userId: number, roleIds: number[]): Promise<void> {
+  await supabase.from('user_roles').update({ deleted_at: new Date().toISOString() }).eq('user_id', userId).is('deleted_at', null);
+  const ids = Array.from(new Set(roleIds));
+  if (ids.length) {
+    const { error } = await supabase.from('user_roles').insert(ids.map((role_id) => ({ user_id: userId, role_id })));
+    if (error) throw new Error(error.message);
+  }
+}
+
+export async function setUserBuildings(userId: number, buildingIds: number[]): Promise<void> {
+  await supabase.from('user_buildings').update({ deleted_at: new Date().toISOString() }).eq('user_id', userId).is('deleted_at', null);
+  const ids = Array.from(new Set(buildingIds));
+  if (ids.length) {
+    const { error } = await supabase.from('user_buildings').insert(ids.map((building_id) => ({ user_id: userId, building_id })));
+    if (error) throw new Error(error.message);
+  }
 }
 
 export async function createUser(input: CreateUserInput): Promise<{ id: number | undefined; username: string }> {
-  const { error } = await supabase.rpc('create_user_with_password', {
+  const { data, error } = await supabase.rpc('create_user', {
     p_username: input.username,
     p_email: input.email,
     p_password: input.password,
-    p_role: input.role,
     p_first_name: input.first_name || null,
     p_last_name: input.last_name || null,
     p_mobile_no: input.mobile_no || null,
-    p_customer_id: input.customer_id || null,
-    p_device_id: input.device_id || null,
-    p_group_id: input.group_id || null,
-    p_org_name: input.org_name || null,
-    p_device_type: input.device_type || null,
+    p_organization_id: input.organization_id || null,
+    p_parent_user_id: input.parent_user_id || null,
+    p_remarks: input.remarks || null,
   });
   if (error) throw new Error(error.message);
-
-  const { data: row } = await supabase
-    .from('users')
-    .select('id')
-    .eq('username', input.username)
-    .single();
-  const newId = (row as any)?.id as number | undefined;
-
-  // The RPC doesn't accept organization_id / remarks / alert flag — patch after.
-  if (newId != null) {
-    const patch: Record<string, unknown> = {};
-    if (input.organization_id !== undefined) patch.organization_id = input.organization_id || null;
-    if (input.remarks !== undefined) patch.remarks = input.remarks || null;
-    if (input.alert_email_enabled !== undefined) patch.alert_email_enabled = input.alert_email_enabled;
-    if (input.building_id !== undefined) patch.building_id = input.building_id || null;
-    if (input.location_id !== undefined) patch.location_id = input.location_id || null;
-    if (Object.keys(patch).length > 0) await supabase.from('users').update(patch).eq('id', newId);
+  // create_user returns the new id (scalar)
+  let newId: number | undefined = typeof data === 'number' ? data : (data as any)?.id;
+  if (newId == null) {
+    const { data: row } = await supabase.from('users').select('id').eq('username', input.username).maybeSingle();
+    newId = (row as any)?.id;
   }
-
-  void logAudit('USER_CREATED', { table: 'users', id: newId ?? null, description: `Created user ${input.username} (${input.role})` });
+  if (newId != null) {
+    await setUserRoles(newId, input.role_ids);
+    await setUserBuildings(newId, input.building_ids);
+  }
+  void logAudit('CREATE', { entity_type: 'users', entity_id: newId ?? null, description: `Created user ${input.username}` });
   return { id: newId, username: input.username };
 }
 
-export async function updateUser(userId: number, fields: UpdateUserInput): Promise<{ id: number }> {
-  const patch: Record<string, unknown> = {};
-  if (fields.role !== undefined) patch.role = fields.role;
-  if (fields.email !== undefined) patch.email = fields.email || null;
-  if (fields.device_id !== undefined) patch.device_id = fields.device_id || null;
-  if (fields.group_id !== undefined) patch.group_id = fields.group_id || null;
-  if (fields.first_name !== undefined) patch.first_name = fields.first_name || null;
-  if (fields.last_name !== undefined) patch.last_name = fields.last_name || null;
-  if (fields.mobile_no !== undefined) patch.mobile_no = fields.mobile_no || null;
+export async function updateUser(userId: number, fields: UpdateUserInput): Promise<void> {
+  const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
+  for (const k of ['email', 'first_name', 'last_name', 'mobile_no', 'remarks'] as const) {
+    if (fields[k] !== undefined) patch[k] = (fields[k] as string) || null;
+  }
   if (fields.organization_id !== undefined) patch.organization_id = fields.organization_id || null;
-  if (fields.remarks !== undefined) patch.remarks = fields.remarks || null;
-  if (fields.device_type !== undefined) patch.device_type = fields.device_type || null;
-  if (fields.alert_email_enabled !== undefined) patch.alert_email_enabled = fields.alert_email_enabled;
-  if (fields.building_id !== undefined) patch.building_id = fields.building_id || null;
-  if (fields.location_id !== undefined) patch.location_id = fields.location_id || null;
-
-  const { data, error } = await supabase
-    .from('users')
-    .update(patch)
-    .eq('id', userId)
-    .select('id')
-    .maybeSingle();
-
+  if (fields.parent_user_id !== undefined) patch.parent_user_id = fields.parent_user_id || null;
+  const { error } = await supabase.from('users').update(patch).eq('id', userId);
   if (error) throw new Error(error.message);
-  void logAudit('USER_UPDATED', { table: 'users', id: userId, new: fields });
-  return data as { id: number };
+  void logAudit('UPDATE', { entity_type: 'users', entity_id: userId, new: fields });
 }
 
-// Replace the full set of devices assigned to a user (many-to-many).
-export async function setUserDevices(userId: number, deviceIds: number[]): Promise<void> {
-  const { error: delErr } = await supabase.from('user_devices').delete().eq('user_id', userId);
-  if (delErr) throw new Error(delErr.message);
-
-  const ids = (deviceIds ?? []).filter((x) => x != null);
-  if (ids.length === 0) return;
-
-  const rows = ids.map((device_id) => ({ user_id: userId, device_id }));
-  const { error: insErr } = await supabase.from('user_devices').insert(rows);
-  if (insErr) throw new Error(insErr.message);
-}
-
-export async function toggleUserActive(
-  userId: number,
-  isActive: boolean
-): Promise<{ id: number; is_active: boolean }> {
-  const { data, error } = await supabase
-    .from('users')
-    .update({ is_active: isActive })
-    .eq('id', userId)
-    .select('id, is_active')
-    .maybeSingle();
-
+export async function toggleUserActive(userId: number, isActive: boolean): Promise<void> {
+  const { error } = await supabase.from('users').update({ is_active: isActive, updated_at: new Date().toISOString() }).eq('id', userId);
   if (error) throw new Error(error.message);
-  void logAudit(isActive ? 'USER_ACTIVATED' : 'USER_DEACTIVATED', { table: 'users', id: userId });
-  return data as { id: number; is_active: boolean };
+  void logAudit('UPDATE', { entity_type: 'users', entity_id: userId, description: isActive ? 'Activated' : 'Deactivated' });
 }
 
-// Replace the full alert-email list for a user (user_alert_emails table).
-export async function setUserAlertEmails(userId: number, emails: string[]): Promise<void> {
-  const { error: delErr } = await supabase.from('user_alert_emails').delete().eq('user_id', userId);
-  if (delErr) throw new Error(delErr.message);
-  const clean = (emails ?? []).map((e) => e.trim()).filter((e) => e.length > 0);
-  if (clean.length === 0) return;
-  // de-duplicate (table has UNIQUE(user_id, email))
-  const rows = Array.from(new Set(clean)).map((email) => ({ user_id: userId, email }));
-  const { error: insErr } = await supabase.from('user_alert_emails').insert(rows);
-  if (insErr) throw new Error(insErr.message);
+export async function deleteUser(userId: number): Promise<void> {
+  await supabase.from('user_roles').delete().eq('user_id', userId);
+  await supabase.from('user_buildings').delete().eq('user_id', userId);
+  await supabase.from('user_alert_preferences').delete().eq('user_id', userId);
+  const { error } = await supabase.from('users').delete().eq('id', userId);
+  if (error) throw new Error(error.message);
+  void logAudit('DELETE', { entity_type: 'users', entity_id: userId });
 }
 
 // ---------------------------------------------------------------------------
-// Locations (admin CRUD)
+// Alert preferences (per user)
 // ---------------------------------------------------------------------------
 
-export async function fetchLocations(): Promise<Location[]> {
+export async function fetchAlertPreferences(userId: number): Promise<UserAlertPreference[]> {
   const { data, error } = await supabase
-    .from('locations')
-    .select('id, name, type, parent_id, created_at')
-    .order('id', { ascending: true });
-  if (error) throw new Error(error.message);
-  return (data ?? []) as Location[];
+    .from('user_alert_preferences')
+    .select('id, user_id, alert_type, severity_level, channel, destination, is_enabled')
+    .eq('user_id', userId)
+    .order('id');
+  if (error) return [];
+  return (data ?? []) as UserAlertPreference[];
 }
 
-export async function createLocation(input: {
-  name: string;
-  type: string;
-  parent_id?: number | null;
-}): Promise<{ id: number }> {
-  const { data, error } = await supabase
-    .from('locations')
-    .insert({ name: input.name, type: input.type, parent_id: input.parent_id || null })
-    .select('id')
-    .single();
-  if (error) throw new Error(error.message);
-  const created = data as { id: number };
-  void logAudit('LOCATION_CREATED', { table: 'locations', id: created.id, new: input, description: `Location ${input.name} created` });
-  return created;
-}
-
-export async function updateLocation(
-  id: number,
-  fields: { name?: string; type?: string; parent_id?: number | null }
-): Promise<{ id: number }> {
-  const patch: Record<string, unknown> = {};
-  if (fields.name !== undefined) patch.name = fields.name;
-  if (fields.type !== undefined) patch.type = fields.type;
-  if (fields.parent_id !== undefined) patch.parent_id = fields.parent_id || null;
-  const { data, error } = await supabase
-    .from('locations')
-    .update(patch)
-    .eq('id', id)
-    .select('id')
-    .single();
-  if (error) throw new Error(error.message);
-  void logAudit('LOCATION_UPDATED', { table: 'locations', id, new: fields });
-  return data as { id: number };
-}
-
-export async function deleteLocation(id: number): Promise<{ id: number }> {
-  const { error } = await supabase.from('locations').delete().eq('id', id);
-  if (error) throw new Error(error.message);
-  void logAudit('LOCATION_DELETED', { table: 'locations', id });
-  return { id };
+export async function setAlertPreferences(userId: number, prefs: UserAlertPreference[]): Promise<void> {
+  await supabase.from('user_alert_preferences').delete().eq('user_id', userId);
+  const rows = prefs
+    .filter((p) => p.channel && p.destination)
+    .map((p) => ({
+      user_id: userId,
+      alert_type: p.alert_type || null,
+      severity_level: p.severity_level || null,
+      channel: p.channel,
+      destination: p.destination,
+      is_enabled: p.is_enabled,
+    }));
+  if (rows.length) {
+    const { error } = await supabase.from('user_alert_preferences').insert(rows);
+    if (error) throw new Error(error.message);
+  }
 }
 
 // ---------------------------------------------------------------------------
-// Audit Log (read-only; requires a SELECT policy for the anon key)
+// Login logs + Audit log (admin, read-only)
 // ---------------------------------------------------------------------------
+
+export async function fetchLoginLogs(limit = 200): Promise<LoginLog[]> {
+  const { data, error } = await supabase
+    .from('login_logs')
+    .select('id, user_id, device_type, os_name, browser, ip_address, was_successful, created_at, users ( username )')
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (error) throw new Error(error.message);
+  return ((data ?? []) as any[]).map((l) => ({
+    id: l.id,
+    user_id: l.user_id,
+    username: l.users?.username ?? null,
+    device_type: l.device_type,
+    os_name: l.os_name ?? null,
+    browser: l.browser ?? null,
+    ip_address: l.ip_address ?? null,
+    was_successful: l.was_successful,
+    created_at: l.created_at,
+  }));
+}
 
 export async function fetchAuditLog(limit = 200): Promise<AuditLogEntry[]> {
   const { data, error } = await supabase.rpc('get_audit_log', { p_limit: limit });
   if (error) throw new Error(error.message);
-  return (data ?? []) as AuditLogEntry[];
-}
-
-export async function deleteUser(userId: number): Promise<{ id: number }> {
-  // Detach references that would otherwise block the delete.
-  await supabase.from('events').update({ acknowledged_by: null }).eq('acknowledged_by', userId);
-  await supabase.from('user_devices').delete().eq('user_id', userId);
-
-  const { error } = await supabase.from('users').delete().eq('id', userId);
-  if (error) throw new Error(error.message);
-  void logAudit('USER_DELETED', { table: 'users', id: userId });
-  return { id: userId };
+  const rows = (data ?? []) as any[];
+  // resolve usernames
+  const ids = Array.from(new Set(rows.map((r) => r.user_id).filter((x) => x != null)));
+  const nameById: Record<number, string> = {};
+  if (ids.length) {
+    const { data: us } = await supabase.from('users').select('id, username').in('id', ids);
+    for (const u of (us ?? []) as any[]) nameById[u.id] = u.username;
+  }
+  return rows.map((r) => ({
+    id: r.id,
+    user_id: r.user_id ?? null,
+    username: r.user_id != null ? nameById[r.user_id] ?? null : null,
+    action: r.action,
+    entity_type: r.entity_type ?? null,
+    entity_id: r.entity_id ?? null,
+    description: r.description ?? null,
+    created_at: r.created_at,
+  }));
 }

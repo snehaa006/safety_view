@@ -32,13 +32,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser({
           id: payload.id,
           username: payload.sub,
-          role: payload.role,
-          device_id: payload.device_id ?? null,
-          group_id: payload.group_id ?? null,
-          building_id: payload.building_id ?? null,
-          location_id: payload.location_id ?? null,
+          roles: payload.roles ?? [],
           organization_id: payload.organization_id ?? null,
-          hierarchy_level: payload.hierarchy_level ?? null,
         });
       } else {
         apiLogout();
