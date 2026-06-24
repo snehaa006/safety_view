@@ -1,4 +1,4 @@
-import { useLocation, matchPath } from 'react-router-dom';
+import { useLocation, matchPath, useNavigate } from 'react-router-dom';
 import { Clock, LogOut } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/button';
@@ -35,6 +35,7 @@ function titleForPath(pathname: string): string {
 export default function Topbar() {
   const { user, logout } = useAuth();
   const { pathname } = useLocation();
+  const navigate = useNavigate();
 
   return (
     <header className="flex items-center justify-between border-b border-border bg-card px-6 py-4">
@@ -44,16 +45,22 @@ export default function Topbar() {
           <Clock className="h-3.5 w-3.5" />
           <span>Live</span>
         </div>
-        <div className="flex items-center gap-3">
+        <button
+          onClick={() => navigate('/profile')}
+          className="flex items-center gap-3 rounded-md px-2 py-1 transition-colors hover:bg-secondary"
+        >
           <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary text-sm font-bold text-primary-foreground">
             {user?.username?.charAt(0).toUpperCase()}
           </div>
-          <div className="leading-tight">
+          <div className="leading-tight text-left">
             <div className="text-sm font-semibold">{user?.username}</div>
             <div className="max-w-[160px] truncate text-xs text-muted-foreground">{user?.roles?.join(', ') || 'No role'}</div>
           </div>
-          <Button variant="ghost" size="icon" onClick={logout} title="Sign out"><LogOut className="h-4 w-4" /></Button>
-        </div>
+        </button>
+        <Button variant="outline" size="sm" onClick={logout} className="gap-1.5">
+          <LogOut className="h-3.5 w-3.5" />
+          Logout
+        </Button>
       </div>
     </header>
   );

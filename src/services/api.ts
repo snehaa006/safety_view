@@ -629,6 +629,12 @@ export async function fetchZonesByState(state: 'FIRE' | 'FAULT', user: AuthUser 
   }));
 }
 
+export async function updateZoneName(id: number, name: string): Promise<void> {
+  const { error } = await supabase.from('zones').update({ zone_name: name }).eq('id', id);
+  if (error) throw new Error(error.message);
+  void logAudit('UPDATE', { entity_type: 'zones', entity_id: id, description: name });
+}
+
 export async function fetchZonesByPanel(panelId: number): Promise<Zone[]> {
   const { data, error } = await supabase
     .from('zones')

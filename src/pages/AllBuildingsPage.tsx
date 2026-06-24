@@ -10,24 +10,6 @@ import type { Building } from '@/types';
 
 type StatusFilter = 'all' | 'fire' | 'fault' | 'healthy';
 
-const STATUS_OPTIONS: { value: StatusFilter; label: string; cls: string; active: string }[] = [
-  { value: 'all',     label: 'All',     cls: 'border-border text-muted-foreground hover:bg-secondary',    active: 'bg-secondary text-foreground border-border' },
-  { value: 'fire',    label: 'Fire',    cls: 'border-crit-border text-crit-text hover:bg-crit-bg',        active: 'bg-crit-bg text-crit-strong border-crit-border' },
-  { value: 'fault',   label: 'Fault',   cls: 'border-warn-border text-warn-text hover:bg-warn-bg',        active: 'bg-warn-bg text-warn-strong border-warn-border' },
-  { value: 'healthy', label: 'Healthy', cls: 'border-ok-border text-ok-text hover:bg-ok-bg',              active: 'bg-ok-bg text-ok-strong border-ok-border' },
-];
-
-function FilterChip({ opt, active, onClick }: { opt: typeof STATUS_OPTIONS[0]; active: boolean; onClick: () => void }) {
-  return (
-    <button
-      onClick={onClick}
-      className={cn('rounded-full border px-3 py-1 text-xs font-medium transition-colors', active ? opt.active : opt.cls)}
-    >
-      {opt.label}
-    </button>
-  );
-}
-
 export default function AllBuildingsPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -138,15 +120,14 @@ export default function AllBuildingsPage() {
 
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-2">
-        {/* Search */}
         <div className="relative">
           <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
           <input
             type="text"
-            placeholder="Search by name, city, address…"
+            placeholder="Search name, city, address…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="h-8 w-60 rounded-md border border-border bg-background pl-8 pr-3 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+            className="h-8 w-56 rounded-md border border-border bg-background pl-8 pr-3 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
           />
           {search && (
             <button onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
@@ -155,14 +136,17 @@ export default function AllBuildingsPage() {
           )}
         </div>
 
-        {/* Status chips */}
-        <div className="flex items-center gap-1.5">
-          {STATUS_OPTIONS.map((opt) => (
-            <FilterChip key={opt.value} opt={opt} active={statusFilter === opt.value} onClick={() => setStatusFilter(opt.value)} />
-          ))}
-        </div>
+        <select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
+          className="h-8 rounded-md border border-border bg-background px-2 text-xs text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+        >
+          <option value="all">All statuses</option>
+          <option value="fire">Has fire</option>
+          <option value="fault">Has fault</option>
+          <option value="healthy">Healthy</option>
+        </select>
 
-        {/* Group dropdown */}
         {groups.length > 0 && (
           <select
             value={groupFilter}
@@ -174,7 +158,6 @@ export default function AllBuildingsPage() {
           </select>
         )}
 
-        {/* Clear */}
         {hasFilters && (
           <button onClick={clearFilters} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
             <X className="h-3 w-3" /> Clear
