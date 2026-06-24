@@ -15,7 +15,7 @@ interface NavItem {
 }
 
 const NAV_ITEMS: NavItem[] = [
-  { to: '/buildings', label: 'Buildings', icon: Warehouse },
+  { to: '/buildings', label: 'Overview', icon: Warehouse },
   { to: '/alerts', label: 'Alerts', icon: Bell },
   { to: '/building-management', label: 'Building Management', icon: Building2, adminOnly: true },
   { to: '/panel-management', label: 'Panel Management', icon: Cpu, adminOnly: true },

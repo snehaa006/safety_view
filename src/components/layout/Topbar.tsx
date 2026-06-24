@@ -5,9 +5,13 @@ import { Button } from '@/components/ui/button';
 
 function titleForPath(pathname: string): string {
   const map: [string, string][] = [
-    ['/buildings/*', 'Building'],
-    ['/buildings', 'Buildings'],
-    ['/panels/*', 'Panel'],
+    ['/buildings/:buildingId', 'Building'],
+    ['/buildings', 'Overview'],
+    ['/all-buildings', 'All Buildings'],
+    ['/all-panels', 'All Panels'],
+    ['/fire-zones', 'Fire Zones'],
+    ['/fault-zones', 'Fault Zones'],
+    ['/panels/:panelId', 'Panel'],
     ['/alerts', 'Alerts'],
     ['/building-management', 'Building Management'],
     ['/panel-management', 'Panel Management'],

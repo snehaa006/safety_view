@@ -21,6 +21,9 @@ import BuildingManagementPage from '@/pages/BuildingManagementPage';
 import PanelManagementPage from '@/pages/PanelManagementPage';
 import AuditLogPage from '@/pages/AuditLogPage';
 import LoginLogsPage from '@/pages/LoginLogsPage';
+import AllBuildingsPage from '@/pages/AllBuildingsPage';
+import AllPanelsPage from '@/pages/AllPanelsPage';
+import ZonesByStatePage from '@/pages/ZonesByStatePage';
 
 export default function App() {
   return (
@@ -33,6 +36,10 @@ export default function App() {
             <Route element={<DashboardLayout />}>
               <Route path="/buildings" element={<BuildingsPage />} />
               <Route path="/buildings/:buildingId" element={<BuildingPanelsPage />} />
+              <Route path="/all-buildings" element={<AllBuildingsPage />} />
+              <Route path="/all-panels" element={<AllPanelsPage />} />
+              <Route path="/fire-zones" element={<ZonesByStatePage />} />
+              <Route path="/fault-zones" element={<ZonesByStatePage />} />
               <Route path="/panels/:panelId" element={<PanelZonesPage />} />
               <Route path="/alerts" element={<AlertsPage />} />
               <Route path="/profile" element={<ProfilePage />} />
