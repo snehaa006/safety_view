@@ -1,13 +1,30 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChevronLeft, Cpu, LayoutGrid, List } from 'lucide-react';
+import { ChevronLeft, Cpu, LayoutGrid, List, Search, X } from 'lucide-react';
 import { fetchPanelsForUser } from '@/services/api';
 import { useAuth } from '@/context/AuthContext';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { PANEL_STATUS_META } from '@/utils/format';
 import { cn } from '@/lib/utils';
-import type { Panel } from '@/types';
+import type { Panel, PanelStatus } from '@/types';
+
+type ZoneFilter = 'all' | 'fire' | 'fault' | 'healthy';
+
+const STATUS_OPTS: { value: PanelStatus | 'all'; label: string }[] = [
+  { value: 'all',     label: 'All statuses' },
+  { value: 'NORMAL',  label: 'Normal' },
+  { value: 'ALARM',   label: 'Alarm' },
+  { value: 'FAULT',   label: 'Fault' },
+  { value: 'OFFLINE', label: 'Offline' },
+];
+
+const ZONE_OPTS: { value: ZoneFilter; label: string; cls: string; active: string }[] = [
+  { value: 'all',     label: 'All',     cls: 'border-border text-muted-foreground hover:bg-secondary',    active: 'bg-secondary text-foreground border-border' },
+  { value: 'fire',    label: 'Has Fire', cls: 'border-crit-border text-crit-text hover:bg-crit-bg',       active: 'bg-crit-bg text-crit-strong border-crit-border' },
+  { value: 'fault',   label: 'Has Fault', cls: 'border-warn-border text-warn-text hover:bg-warn-bg',     active: 'bg-warn-bg text-warn-strong border-warn-border' },
+  { value: 'healthy', label: 'Clean',   cls: 'border-ok-border text-ok-text hover:bg-ok-bg',              active: 'bg-ok-bg text-ok-strong border-ok-border' },
+];
 
 export default function AllPanelsPage() {
   const { user } = useAuth();
@@ -16,6 +33,10 @@ export default function AllPanelsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<PanelStatus | 'all'>('all');
+  const [zoneFilter, setZoneFilter] = useState<ZoneFilter>('all');
+  const [buildingFilter, setBuildingFilter] = useState('');
 
   useEffect(() => {
     let mounted = true;
@@ -32,10 +53,36 @@ export default function AllPanelsPage() {
     return () => { mounted = false; };
   }, [user]);
 
-  // Group panels by building
+  const buildings = useMemo(() => {
+    const seen = new Map<number, string>();
+    for (const p of panels) {
+      if (!seen.has(p.building_id)) seen.set(p.building_id, p.building_name ?? 'Unknown');
+    }
+    return Array.from(seen.entries())
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [panels]);
+
+  const filteredPanels = useMemo(() => {
+    const q = search.toLowerCase().trim();
+    return panels.filter((p) => {
+      if (statusFilter !== 'all' && p.status !== statusFilter) return false;
+      if (zoneFilter === 'fire' && p.fire === 0) return false;
+      if (zoneFilter === 'fault' && p.fault === 0) return false;
+      if (zoneFilter === 'healthy' && (p.fire > 0 || p.fault > 0)) return false;
+      if (buildingFilter && String(p.building_id) !== buildingFilter) return false;
+      if (q) {
+        const haystack = [p.panel_name, p.panel_code, p.building_name].filter(Boolean).join(' ').toLowerCase();
+        if (!haystack.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [panels, search, statusFilter, zoneFilter, buildingFilter]);
+
+  // Group filtered panels by building
   const grouped = useMemo(() => {
     const map = new Map<string, { buildingId: number; buildingName: string; panels: Panel[] }>();
-    for (const p of panels) {
+    for (const p of filteredPanels) {
       const key = String(p.building_id);
       if (!map.has(key)) {
         map.set(key, { buildingId: p.building_id, buildingName: p.building_name ?? 'Unknown Building', panels: [] });
@@ -43,13 +90,23 @@ export default function AllPanelsPage() {
       map.get(key)!.panels.push(p);
     }
     return Array.from(map.values()).sort((a, b) => a.buildingName.localeCompare(b.buildingName));
-  }, [panels]);
+  }, [filteredPanels]);
+
+  const hasFilters = search || statusFilter !== 'all' || zoneFilter !== 'all' || buildingFilter;
+
+  function clearFilters() {
+    setSearch('');
+    setStatusFilter('all');
+    setZoneFilter('all');
+    setBuildingFilter('');
+  }
 
   if (loading) return <div className="py-20 text-center text-muted-foreground">Loading panels…</div>;
   if (error) return <div className="rounded-md border border-crit-border bg-crit-bg px-4 py-3 text-sm text-crit-text">{error}</div>;
 
   return (
-    <section className="space-y-6">
+    <section className="space-y-4">
+      {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <button
@@ -60,7 +117,9 @@ export default function AllPanelsPage() {
           </button>
           <div>
             <h3 className="text-lg font-semibold">All Panels</h3>
-            <p className="text-sm text-muted-foreground">{panels.length} panel{panels.length !== 1 ? 's' : ''} across {grouped.length} building{grouped.length !== 1 ? 's' : ''}</p>
+            <p className="text-sm text-muted-foreground">
+              {filteredPanels.length} of {panels.length} panel{panels.length !== 1 ? 's' : ''}
+            </p>
           </div>
         </div>
         <div className="flex items-center gap-1 rounded-md border border-border bg-background p-1">
@@ -81,8 +140,71 @@ export default function AllPanelsPage() {
         </div>
       </div>
 
-      {panels.length === 0 ? (
-        <Card className="border-dashed p-12 text-center text-sm text-muted-foreground">No panels found in your scope.</Card>
+      {/* Filters */}
+      <div className="flex flex-wrap items-center gap-2">
+        {/* Search */}
+        <div className="relative">
+          <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <input
+            type="text"
+            placeholder="Search by name, code, building…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="h-8 w-60 rounded-md border border-border bg-background pl-8 pr-3 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+          />
+          {search && (
+            <button onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+
+        {/* Panel status */}
+        <select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value as PanelStatus | 'all')}
+          className="h-8 rounded-md border border-border bg-background px-2 text-xs text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+        >
+          {STATUS_OPTS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+
+        {/* Zone state chips */}
+        <div className="flex items-center gap-1.5">
+          {ZONE_OPTS.map((opt) => (
+            <button
+              key={opt.value}
+              onClick={() => setZoneFilter(opt.value)}
+              className={cn('rounded-full border px-3 py-1 text-xs font-medium transition-colors', zoneFilter === opt.value ? opt.active : opt.cls)}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Building dropdown */}
+        {buildings.length > 1 && (
+          <select
+            value={buildingFilter}
+            onChange={(e) => setBuildingFilter(e.target.value)}
+            className="h-8 rounded-md border border-border bg-background px-2 text-xs text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+          >
+            <option value="">All buildings</option>
+            {buildings.map((b) => <option key={b.id} value={String(b.id)}>{b.name}</option>)}
+          </select>
+        )}
+
+        {hasFilters && (
+          <button onClick={clearFilters} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
+            <X className="h-3 w-3" /> Clear
+          </button>
+        )}
+      </div>
+
+      {/* Results */}
+      {filteredPanels.length === 0 ? (
+        <Card className="border-dashed p-12 text-center text-sm text-muted-foreground">
+          {panels.length === 0 ? 'No panels found in your scope.' : 'No panels match your filters.'}
+        </Card>
       ) : (
         <div className="space-y-8">
           {grouped.map((group) => (

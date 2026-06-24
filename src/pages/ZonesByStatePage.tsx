@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { AlertTriangle, ChevronLeft, Flame, LayoutGrid, List } from 'lucide-react';
+import { AlertTriangle, ChevronLeft, Flame, LayoutGrid, List, Search, X } from 'lucide-react';
 import { fetchZonesByState } from '@/services/api';
 import { useAuth } from '@/context/AuthContext';
 import { Card } from '@/components/ui/card';
@@ -33,11 +33,17 @@ export default function ZonesByStatePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [search, setSearch] = useState('');
+  const [buildingFilter, setBuildingFilter] = useState('');
+  const [zoneTypeFilter, setZoneTypeFilter] = useState('');
 
   useEffect(() => {
     let mounted = true;
     setLoading(true);
     setError('');
+    setSearch('');
+    setBuildingFilter('');
+    setZoneTypeFilter('');
     (async () => {
       try {
         const data = await fetchZonesByState(zoneState, user);
@@ -51,9 +57,39 @@ export default function ZonesByStatePage() {
     return () => { mounted = false; };
   }, [zoneState, user]);
 
+  // Derive unique buildings and zone types for filter dropdowns
+  const buildingOptions = useMemo(() => {
+    const seen = new Map<number, string>();
+    for (const z of zones) {
+      if (!seen.has(z.building_id)) seen.set(z.building_id, z.building_name);
+    }
+    return Array.from(seen.entries())
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [zones]);
+
+  const zoneTypeOptions = useMemo(() => {
+    const seen = new Set<string>();
+    for (const z of zones) if (z.zone_type) seen.add(z.zone_type);
+    return Array.from(seen).sort();
+  }, [zones]);
+
+  const filteredZones = useMemo(() => {
+    const q = search.toLowerCase().trim();
+    return zones.filter((z) => {
+      if (buildingFilter && String(z.building_id) !== buildingFilter) return false;
+      if (zoneTypeFilter && z.zone_type !== zoneTypeFilter) return false;
+      if (q) {
+        const haystack = [z.zone_name, z.zone_type, z.building_name, z.panel_name, z.panel_code].filter(Boolean).join(' ').toLowerCase();
+        if (!haystack.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [zones, search, buildingFilter, zoneTypeFilter]);
+
   const grouped = useMemo((): GroupedBuilding[] => {
     const buildingMap = new Map<number, GroupedBuilding>();
-    for (const z of zones) {
+    for (const z of filteredZones) {
       if (!buildingMap.has(z.building_id)) {
         buildingMap.set(z.building_id, { buildingId: z.building_id, buildingName: z.building_name, panels: [] });
       }
@@ -66,18 +102,26 @@ export default function ZonesByStatePage() {
       panel.zones.push(z);
     }
     return Array.from(buildingMap.values()).sort((a, b) => a.buildingName.localeCompare(b.buildingName));
-  }, [zones]);
+  }, [filteredZones]);
 
   const isFire = zoneState === 'FIRE';
   const Icon = isFire ? Flame : AlertTriangle;
   const accentColor = isFire ? 'border-l-crit-strong' : 'border-l-warn-strong';
   const stateMeta = ZONE_STATE_META[zoneState];
+  const hasFilters = search || buildingFilter || zoneTypeFilter;
+
+  function clearFilters() {
+    setSearch('');
+    setBuildingFilter('');
+    setZoneTypeFilter('');
+  }
 
   if (loading) return <div className="py-20 text-center text-muted-foreground">Loading zones…</div>;
   if (error) return <div className="rounded-md border border-crit-border bg-crit-bg px-4 py-3 text-sm text-crit-text">{error}</div>;
 
   return (
-    <section className="space-y-6">
+    <section className="space-y-4">
+      {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <button
@@ -91,7 +135,7 @@ export default function ZonesByStatePage() {
             <div>
               <h3 className="text-lg font-semibold">{isFire ? 'Fire Zones' : 'Fault Zones'}</h3>
               <p className="text-sm text-muted-foreground">
-                {zones.length} zone{zones.length !== 1 ? 's' : ''} across {grouped.length} building{grouped.length !== 1 ? 's' : ''}
+                {filteredZones.length} of {zones.length} zone{zones.length !== 1 ? 's' : ''}
               </p>
             </div>
           </div>
@@ -114,9 +158,62 @@ export default function ZonesByStatePage() {
         </div>
       </div>
 
-      {zones.length === 0 ? (
+      {/* Filters */}
+      <div className="flex flex-wrap items-center gap-2">
+        {/* Search */}
+        <div className="relative">
+          <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <input
+            type="text"
+            placeholder="Search by zone name, type…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="h-8 w-56 rounded-md border border-border bg-background pl-8 pr-3 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+          />
+          {search && (
+            <button onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+
+        {/* Building filter */}
+        {buildingOptions.length > 1 && (
+          <select
+            value={buildingFilter}
+            onChange={(e) => setBuildingFilter(e.target.value)}
+            className="h-8 rounded-md border border-border bg-background px-2 text-xs text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+          >
+            <option value="">All buildings</option>
+            {buildingOptions.map((b) => <option key={b.id} value={String(b.id)}>{b.name}</option>)}
+          </select>
+        )}
+
+        {/* Zone type filter */}
+        {zoneTypeOptions.length > 1 && (
+          <select
+            value={zoneTypeFilter}
+            onChange={(e) => setZoneTypeFilter(e.target.value)}
+            className="h-8 rounded-md border border-border bg-background px-2 text-xs text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+          >
+            <option value="">All zone types</option>
+            {zoneTypeOptions.map((t) => <option key={t} value={t}>{t}</option>)}
+          </select>
+        )}
+
+        {hasFilters && (
+          <button onClick={clearFilters} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
+            <X className="h-3 w-3" /> Clear
+          </button>
+        )}
+      </div>
+
+      {/* Results */}
+      {filteredZones.length === 0 ? (
         <Card className="border-dashed p-12 text-center text-sm text-muted-foreground">
-          No {isFire ? 'fire' : 'fault'} zones found.
+          {zones.length === 0
+            ? `No ${isFire ? 'fire' : 'fault'} zones found.`
+            : 'No zones match your filters.'}
         </Card>
       ) : (
         <div className="space-y-8">
@@ -153,10 +250,10 @@ export default function ZonesByStatePage() {
                         {panel.zones.map((z) => (
                           <Card key={z.id} className={cn('flex flex-col gap-1.5 border-l-4 p-3', accentColor)}>
                             <div className="flex items-center justify-between">
-                              <span className="text-xs font-mono text-muted-foreground">Zone {z.zone_number}</span>
+                              <span className="font-mono text-xs text-muted-foreground">Zone {z.zone_number}</span>
                               <Badge className={stateMeta.badge}>{zoneState}</Badge>
                             </div>
-                            <div className="font-semibold text-sm">{z.zone_name}</div>
+                            <div className="text-sm font-semibold">{z.zone_name}</div>
                             <div className="text-xs text-muted-foreground">{z.zone_type}</div>
                             {z.current_reading != null && (
                               <div className="text-xs text-muted-foreground">Reading: {z.current_reading}</div>
@@ -169,8 +266,11 @@ export default function ZonesByStatePage() {
                         {panel.zones.map((z) => (
                           <Card key={z.id} className={cn('flex items-center gap-4 border-l-4 px-4 py-2.5', accentColor)}>
                             <span className="w-16 shrink-0 font-mono text-xs text-muted-foreground">Zone {z.zone_number}</span>
-                            <span className="min-w-0 flex-1 font-semibold text-sm">{z.zone_name}</span>
+                            <span className="min-w-0 flex-1 text-sm font-semibold">{z.zone_name}</span>
                             <span className="shrink-0 text-xs text-muted-foreground">{z.zone_type}</span>
+                            {z.current_reading != null && (
+                              <span className="shrink-0 text-xs text-muted-foreground">{z.current_reading}</span>
+                            )}
                             <Badge className={stateMeta.badge}>{zoneState}</Badge>
                           </Card>
                         ))}
