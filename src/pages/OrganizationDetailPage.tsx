@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ChevronLeft, Pencil, Trash2 } from 'lucide-react';
+import { ChevronLeft, Pencil, Trash2, Users } from 'lucide-react';
 import { fetchOrganizationById, deleteOrganization } from '@/services/api';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -52,6 +52,9 @@ export default function OrganizationDetailPage() {
           <ChevronLeft className="h-4 w-4" /> Back to Organizations
         </button>
         <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={() => navigate(`/users?org=${encodeURIComponent(org.organization_name)}`)}>
+            <Users className="h-4 w-4" /> View Users
+          </Button>
           <Button variant="outline" size="sm" onClick={() => navigate(`/organizations/${org.id}/edit`)}>
             <Pencil className="h-4 w-4" /> Edit
           </Button>

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ChevronLeft, Pencil, Trash2 } from 'lucide-react';
+import { ChevronLeft, Pencil, Trash2, Users } from 'lucide-react';
 import { fetchRoleById, deleteRole } from '@/services/api';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -50,6 +50,9 @@ export default function RoleDetailPage() {
           <ChevronLeft className="h-4 w-4" /> Back to Roles
         </button>
         <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={() => navigate(`/users?role=${encodeURIComponent(role.role_name)}`)}>
+            <Users className="h-4 w-4" /> View Users
+          </Button>
           <Button variant="outline" size="sm" onClick={() => navigate(`/roles/${role.id}/edit`)}>
             <Pencil className="h-4 w-4" /> Edit
           </Button>

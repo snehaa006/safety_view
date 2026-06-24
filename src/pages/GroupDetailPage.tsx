@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ChevronLeft, Pencil, Trash2 } from 'lucide-react';
+import { Building2, ChevronLeft, Pencil, Trash2 } from 'lucide-react';
 import { fetchGroupById, deleteGroup } from '@/services/api';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -50,6 +50,9 @@ export default function GroupDetailPage() {
           <ChevronLeft className="h-4 w-4" /> Back to Groups
         </button>
         <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={() => navigate(`/building-management?group=${encodeURIComponent(group.group_name)}`)}>
+            <Building2 className="h-4 w-4" /> View Buildings
+          </Button>
           <Button variant="outline" size="sm" onClick={() => navigate(`/groups/${group.id}/edit`)}>
             <Pencil className="h-4 w-4" /> Edit
           </Button>
