@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Plus, Search, X } from 'lucide-react';
 import { fetchUsers, fetchRoles, toggleUserActive, deleteUser } from '@/services/api';
 import { Card } from '@/components/ui/card';
@@ -20,13 +20,15 @@ import type { ManagedUser, Role } from '@/types';
 
 export default function UserManagementPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [users, setUsers] = useState<ManagedUser[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   const [query, setQuery] = useState('');
-  const [roleFilter, setRoleFilter] = useState('all');
+  const [roleFilter, setRoleFilter] = useState(searchParams.get('role') || 'all');
+  const [orgFilter, setOrgFilter] = useState(searchParams.get('org') || 'all');
   const [statusFilter, setStatusFilter] = useState('all');
 
   const [deleteTarget, setDeleteTarget] = useState<ManagedUser | null>(null);
@@ -44,13 +46,19 @@ export default function UserManagementPage() {
     finally { setLoading(false); }
   }
 
-  const filtersActive = query.trim() !== '' || roleFilter !== 'all' || statusFilter !== 'all';
-  function clearFilters() { setQuery(''); setRoleFilter('all'); setStatusFilter('all'); }
+  const orgs = useMemo(() => {
+    const seen = new Set<string>();
+    return users.map((u) => u.organization_name).filter((n): n is string => !!n && !seen.has(n) && !!seen.add(n)).sort();
+  }, [users]);
+
+  const filtersActive = query.trim() !== '' || roleFilter !== 'all' || orgFilter !== 'all' || statusFilter !== 'all';
+  function clearFilters() { setQuery(''); setRoleFilter('all'); setOrgFilter('all'); setStatusFilter('all'); }
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return users.filter((u) => {
       if (roleFilter !== 'all' && !u.roles.includes(roleFilter)) return false;
+      if (orgFilter !== 'all' && u.organization_name !== orgFilter) return false;
       if (statusFilter === 'active' && !u.is_active) return false;
       if (statusFilter === 'inactive' && u.is_active) return false;
       if (!q) return true;
@@ -58,7 +66,7 @@ export default function UserManagementPage() {
         .filter(Boolean).join(' ').toLowerCase();
       return hay.includes(q);
     });
-  }, [users, query, roleFilter, statusFilter]);
+  }, [users, query, roleFilter, orgFilter, statusFilter]);
 
   async function handleToggle(u: ManagedUser) {
     try { await toggleUserActive(u.id, !u.is_active); setUsers((p) => p.map((x) => x.id === u.id ? { ...x, is_active: !x.is_active } : x)); }
@@ -86,7 +94,7 @@ export default function UserManagementPage() {
       {error && <div className="rounded-md border border-crit-border bg-crit-bg px-4 py-2 text-sm text-crit-text">{error}</div>}
 
       <Card className="p-4">
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-5">
           <div className="relative lg:col-span-2">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input className="pl-9" placeholder="Search users…" value={query} onChange={(e) => setQuery(e.target.value)} />
@@ -96,6 +104,13 @@ export default function UserManagementPage() {
             <SelectContent>
               <SelectItem value="all">All roles</SelectItem>
               {roles.map((r) => <SelectItem key={r.id} value={r.role_name}>{r.role_name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Select value={orgFilter} onValueChange={setOrgFilter}>
+            <SelectTrigger><SelectValue placeholder="Organization" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All organizations</SelectItem>
+              {orgs.map((o) => <SelectItem key={o} value={o}>{o}</SelectItem>)}
             </SelectContent>
           </Select>
           <Select value={statusFilter} onValueChange={setStatusFilter}>

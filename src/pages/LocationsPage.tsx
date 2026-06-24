@@ -69,6 +69,8 @@ export default function LocationsPage() {
                 <TableHead>State</TableHead>
                 <TableHead>Country</TableHead>
                 <TableHead>Postal</TableHead>
+                <TableHead>Lat</TableHead>
+                <TableHead>Lng</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -79,11 +81,13 @@ export default function LocationsPage() {
                   <TableCell className="text-muted-foreground">{l.state || '—'}</TableCell>
                   <TableCell className="text-muted-foreground">{l.country || '—'}</TableCell>
                   <TableCell className="text-muted-foreground">{l.postal_code || '—'}</TableCell>
+                  <TableCell className="text-muted-foreground">{l.latitude ?? '—'}</TableCell>
+                  <TableCell className="text-muted-foreground">{l.longitude ?? '—'}</TableCell>
                 </TableRow>
               ))}
               {filtered.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
+                  <TableCell colSpan={7} className="py-8 text-center text-muted-foreground">
                     {locations.length === 0 ? 'No locations yet.' : 'No locations match your search.'}
                   </TableCell>
                 </TableRow>

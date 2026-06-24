@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Plus, Search, X } from 'lucide-react';
 import { fetchBuildings, locationLabel } from '@/services/api';
 import { useAuth } from '@/context/AuthContext';
@@ -11,11 +11,12 @@ import type { Building } from '@/types';
 export default function BuildingManagementPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [buildings, setBuildings] = useState<Building[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
-  const [groupFilter, setGroupFilter] = useState('');
+  const [groupFilter, setGroupFilter] = useState(searchParams.get('group') || '');
 
   useEffect(() => {
     fetchBuildings(user)
