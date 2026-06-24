@@ -65,10 +65,18 @@ export default function Sidebar() {
         })}
       </nav>
 
-      <div className="border-t border-border px-5 py-4">
-        <div className="text-sm font-semibold">{user?.username}</div>
-        <div className="truncate text-xs text-muted-foreground">{user?.roles?.join(', ') || 'No role'}</div>
-      </div>
+      <NavLink
+        to="/profile"
+        className="flex items-center gap-3 border-t border-border px-5 py-4 transition-colors hover:bg-secondary"
+      >
+        <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-primary text-sm font-bold text-primary-foreground">
+          {user?.username?.charAt(0).toUpperCase()}
+        </div>
+        <div className="min-w-0">
+          <div className="text-sm font-semibold">{user?.username}</div>
+          <div className="truncate text-xs text-muted-foreground">{user?.roles?.join(', ') || 'No role'}</div>
+        </div>
+      </NavLink>
     </aside>
   );
 }

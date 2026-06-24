@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ChevronLeft } from 'lucide-react';
+import { ChevronLeft, Pencil, Save, X } from 'lucide-react';
 import {
   fetchPanelById,
   fetchZonesByPanel,
   fetchZoneEvents,
   fetchActionLogs,
   performZoneAction,
+  updateZoneName,
 } from '@/services/api';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -22,6 +23,69 @@ const ACTION_LABEL: Record<ManualAction, string> = {
   RESET: 'Reset',
 };
 
+function ZoneCard({
+  zone,
+  editMode,
+  draftName,
+  onDraftChange,
+  busy,
+  onAction,
+}: {
+  zone: Zone;
+  editMode: boolean;
+  draftName: string;
+  onDraftChange: (v: string) => void;
+  busy: string | null;
+  onAction: (z: Zone, a: ManualAction) => void;
+}) {
+  const sm = zoneStateMeta(zone.current_state);
+  return (
+    <Card className={cn('flex flex-col gap-2 border p-3', sm.tile)}>
+      <div className="flex items-center justify-between">
+        <span className="font-mono text-xs opacity-70">#{zone.zone_number}</span>
+        <span className={cn('h-2.5 w-2.5 rounded-full', sm.dot)} />
+      </div>
+
+      {editMode ? (
+        <input
+          value={draftName}
+          onChange={(e) => onDraftChange(e.target.value)}
+          className="rounded border border-current/20 bg-background/60 px-2 py-1 text-sm font-semibold text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+          placeholder="Zone name"
+        />
+      ) : (
+        <div className="truncate text-sm font-semibold">{zone.zone_name}</div>
+      )}
+
+      <div className="flex items-center justify-between text-xs">
+        <span className="font-medium">{sm.label}</span>
+        <span className="opacity-70">{zone.zone_type}</span>
+      </div>
+
+      {zone.current_reading != null && (
+        <div className="text-xs opacity-70">Reading: <strong>{zone.current_reading}</strong></div>
+      )}
+
+      {!editMode && zone.available_actions.length > 0 && (
+        <div className="mt-1 flex flex-wrap gap-1.5 border-t border-current/10 pt-2">
+          {zone.available_actions.map((a) => (
+            <Button
+              key={a}
+              size="sm"
+              variant="outline"
+              className="h-7 bg-background/70 px-2 text-xs"
+              disabled={busy === `${zone.id}:${a}`}
+              onClick={() => onAction(zone, a)}
+            >
+              {busy === `${zone.id}:${a}` ? '…' : ACTION_LABEL[a]}
+            </Button>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+}
+
 export default function PanelZonesPage() {
   const { panelId } = useParams();
   const id = Number(panelId);
@@ -35,6 +99,11 @@ export default function PanelZonesPage() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [tab, setTab] = useState<'events' | 'actions'>('events');
+
+  // Edit mode state
+  const [editMode, setEditMode] = useState(false);
+  const [draftNames, setDraftNames] = useState<Record<number, string>>({});
+  const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
     const [p, z, e, l] = await Promise.all([
@@ -60,10 +129,36 @@ export default function PanelZonesPage() {
         if (mounted) setLoading(false);
       }
     })();
-    return () => {
-      mounted = false;
-    };
+    return () => { mounted = false; };
   }, [load]);
+
+  function enterEditMode() {
+    const initial: Record<number, string> = {};
+    for (const z of zones) initial[z.id] = z.zone_name;
+    setDraftNames(initial);
+    setEditMode(true);
+  }
+
+  function cancelEdit() {
+    setEditMode(false);
+    setDraftNames({});
+  }
+
+  async function saveNames() {
+    setSaving(true);
+    setError('');
+    try {
+      const changed = zones.filter((z) => draftNames[z.id] !== z.zone_name);
+      await Promise.all(changed.map((z) => updateZoneName(z.id, draftNames[z.id]?.trim() || z.zone_name)));
+      await load();
+      setEditMode(false);
+      setDraftNames({});
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Save failed');
+    } finally {
+      setSaving(false);
+    }
+  }
 
   async function runAction(zone: Zone, action: ManualAction) {
     setBusy(`${zone.id}:${action}`);
@@ -80,6 +175,10 @@ export default function PanelZonesPage() {
   if (loading) return <div className="py-20 text-center text-muted-foreground">Loading panel…</div>;
 
   const meta = panel ? PANEL_STATUS_META[panel.status] ?? PANEL_STATUS_META.NORMAL : PANEL_STATUS_META.NORMAL;
+
+  // Split zones into Digital (1-4) and Analog (5+)
+  const digitalZones = zones.filter((z) => z.zone_number <= 4);
+  const analogZones = zones.filter((z) => z.zone_number > 4);
 
   return (
     <section className="space-y-5">
@@ -100,50 +199,77 @@ export default function PanelZonesPage() {
 
       {error && <div className="rounded-md border border-crit-border bg-crit-bg px-4 py-2 text-sm text-crit-text">{error}</div>}
 
-      <div>
-        <h3 className="text-lg font-semibold">Zones ({zones.length})</h3>
-        <p className="text-sm text-muted-foreground">Digital 1–4 · Analog 5–20 — use the controls available on each zone</p>
+      {/* Zones header + edit toggle */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-lg font-semibold">Zones ({zones.length})</h3>
+          <p className="text-sm text-muted-foreground">Digital zones 1–4 · Analog zones 5–20</p>
+        </div>
+        {!editMode ? (
+          <Button variant="outline" size="sm" onClick={enterEditMode} className="gap-1.5">
+            <Pencil className="h-3.5 w-3.5" /> Edit Names
+          </Button>
+        ) : (
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={cancelEdit} className="gap-1.5">
+              <X className="h-3.5 w-3.5" /> Cancel
+            </Button>
+            <Button size="sm" onClick={saveNames} disabled={saving} className="gap-1.5">
+              <Save className="h-3.5 w-3.5" /> {saving ? 'Saving…' : 'Save All'}
+            </Button>
+          </div>
+        )}
       </div>
 
       {zones.length === 0 ? (
         <Card className="border-dashed p-12 text-center text-sm text-muted-foreground">No zones configured for this panel.</Card>
       ) : (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {zones.map((z) => {
-            const sm = zoneStateMeta(z.current_state);
-            return (
-              <Card key={z.id} className={cn('flex flex-col gap-2 border p-3', sm.tile)}>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-bold">Zone {z.zone_number}</span>
-                  <span className={cn('h-2.5 w-2.5 rounded-full', sm.dot)} />
-                </div>
-                <div className="truncate text-sm font-semibold">{z.zone_name}</div>
-                <div className="flex items-center justify-between text-xs">
-                  <span className="font-medium">{sm.label}</span>
-                  <span className="opacity-80">{z.zone_type}</span>
-                </div>
-                {z.current_reading != null && (
-                  <div className="text-xs opacity-80">Reading: <strong>{z.current_reading}</strong></div>
-                )}
-                {z.available_actions.length > 0 && (
-                  <div className="mt-1 flex flex-wrap gap-1.5 border-t border-current/10 pt-2">
-                    {z.available_actions.map((a) => (
-                      <Button
-                        key={a}
-                        size="sm"
-                        variant="outline"
-                        className="h-7 bg-background/70 px-2 text-xs"
-                        disabled={busy === `${z.id}:${a}`}
-                        onClick={() => runAction(z, a)}
-                      >
-                        {busy === `${z.id}:${a}` ? '…' : ACTION_LABEL[a]}
-                      </Button>
-                    ))}
-                  </div>
-                )}
-              </Card>
-            );
-          })}
+        <div className="space-y-6">
+          {digitalZones.length > 0 && (
+            <div className="space-y-3">
+              <div className="flex items-center gap-3">
+                <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Digital Zones</h4>
+                <div className="flex-1 border-t border-border" />
+                <span className="text-xs text-muted-foreground">{digitalZones.length} zone{digitalZones.length !== 1 ? 's' : ''}</span>
+              </div>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                {digitalZones.map((z) => (
+                  <ZoneCard
+                    key={z.id}
+                    zone={z}
+                    editMode={editMode}
+                    draftName={editMode ? (draftNames[z.id] ?? z.zone_name) : z.zone_name}
+                    onDraftChange={(v) => setDraftNames((prev) => ({ ...prev, [z.id]: v }))}
+                    busy={busy}
+                    onAction={runAction}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {analogZones.length > 0 && (
+            <div className="space-y-3">
+              <div className="flex items-center gap-3">
+                <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Analog Zones</h4>
+                <div className="flex-1 border-t border-border" />
+                <span className="text-xs text-muted-foreground">{analogZones.length} zone{analogZones.length !== 1 ? 's' : ''}</span>
+              </div>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                {analogZones.map((z) => (
+                  <ZoneCard
+                    key={z.id}
+                    zone={z}
+                    editMode={editMode}
+                    draftName={editMode ? (draftNames[z.id] ?? z.zone_name) : z.zone_name}
+                    onDraftChange={(v) => setDraftNames((prev) => ({ ...prev, [z.id]: v }))}
+                    busy={busy}
+                    onAction={runAction}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 

@@ -11,21 +11,6 @@ import type { Panel, PanelStatus } from '@/types';
 
 type ZoneFilter = 'all' | 'fire' | 'fault' | 'healthy';
 
-const STATUS_OPTS: { value: PanelStatus | 'all'; label: string }[] = [
-  { value: 'all',     label: 'All statuses' },
-  { value: 'NORMAL',  label: 'Normal' },
-  { value: 'ALARM',   label: 'Alarm' },
-  { value: 'FAULT',   label: 'Fault' },
-  { value: 'OFFLINE', label: 'Offline' },
-];
-
-const ZONE_OPTS: { value: ZoneFilter; label: string; cls: string; active: string }[] = [
-  { value: 'all',     label: 'All',     cls: 'border-border text-muted-foreground hover:bg-secondary',    active: 'bg-secondary text-foreground border-border' },
-  { value: 'fire',    label: 'Has Fire', cls: 'border-crit-border text-crit-text hover:bg-crit-bg',       active: 'bg-crit-bg text-crit-strong border-crit-border' },
-  { value: 'fault',   label: 'Has Fault', cls: 'border-warn-border text-warn-text hover:bg-warn-bg',     active: 'bg-warn-bg text-warn-strong border-warn-border' },
-  { value: 'healthy', label: 'Clean',   cls: 'border-ok-border text-ok-text hover:bg-ok-bg',              active: 'bg-ok-bg text-ok-strong border-ok-border' },
-];
-
 export default function AllPanelsPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -142,15 +127,14 @@ export default function AllPanelsPage() {
 
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-2">
-        {/* Search */}
         <div className="relative">
           <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
           <input
             type="text"
-            placeholder="Search by name, code, building…"
+            placeholder="Search name, code, building…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="h-8 w-60 rounded-md border border-border bg-background pl-8 pr-3 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+            className="h-8 w-56 rounded-md border border-border bg-background pl-8 pr-3 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
           />
           {search && (
             <button onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
@@ -159,29 +143,29 @@ export default function AllPanelsPage() {
           )}
         </div>
 
-        {/* Panel status */}
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value as PanelStatus | 'all')}
           className="h-8 rounded-md border border-border bg-background px-2 text-xs text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
         >
-          {STATUS_OPTS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          <option value="all">All statuses</option>
+          <option value="NORMAL">Normal</option>
+          <option value="ALARM">Alarm</option>
+          <option value="FAULT">Fault</option>
+          <option value="OFFLINE">Offline</option>
         </select>
 
-        {/* Zone state chips */}
-        <div className="flex items-center gap-1.5">
-          {ZONE_OPTS.map((opt) => (
-            <button
-              key={opt.value}
-              onClick={() => setZoneFilter(opt.value)}
-              className={cn('rounded-full border px-3 py-1 text-xs font-medium transition-colors', zoneFilter === opt.value ? opt.active : opt.cls)}
-            >
-              {opt.label}
-            </button>
-          ))}
-        </div>
+        <select
+          value={zoneFilter}
+          onChange={(e) => setZoneFilter(e.target.value as ZoneFilter)}
+          className="h-8 rounded-md border border-border bg-background px-2 text-xs text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+        >
+          <option value="all">All zones</option>
+          <option value="fire">Has fire</option>
+          <option value="fault">Has fault</option>
+          <option value="healthy">Clean</option>
+        </select>
 
-        {/* Building dropdown */}
         {buildings.length > 1 && (
           <select
             value={buildingFilter}

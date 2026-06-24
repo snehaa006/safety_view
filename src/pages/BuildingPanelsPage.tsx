@@ -1,12 +1,29 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ChevronLeft, Cpu } from 'lucide-react';
+import { ChevronLeft, Cpu, Search, X } from 'lucide-react';
 import { fetchBuildingById, fetchPanelsByBuilding, locationLabel } from '@/services/api';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { PANEL_STATUS_META } from '@/utils/format';
 import { cn } from '@/lib/utils';
-import type { Building, Panel } from '@/types';
+import type { Building, Panel, PanelStatus } from '@/types';
+
+type ZoneFilter = 'all' | 'fire' | 'fault' | 'healthy';
+
+const STATUS_OPTS: { value: PanelStatus | 'all'; label: string }[] = [
+  { value: 'all',     label: 'All statuses' },
+  { value: 'NORMAL',  label: 'Normal' },
+  { value: 'ALARM',   label: 'Alarm' },
+  { value: 'FAULT',   label: 'Fault' },
+  { value: 'OFFLINE', label: 'Offline' },
+];
+
+const ZONE_OPTS: { value: ZoneFilter; label: string }[] = [
+  { value: 'all',     label: 'All zones' },
+  { value: 'fire',    label: 'Has fire' },
+  { value: 'fault',   label: 'Has fault' },
+  { value: 'healthy', label: 'Clean' },
+];
 
 export default function BuildingPanelsPage() {
   const { buildingId } = useParams();
@@ -16,6 +33,9 @@ export default function BuildingPanelsPage() {
   const [panels, setPanels] = useState<Panel[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<PanelStatus | 'all'>('all');
+  const [zoneFilter, setZoneFilter] = useState<ZoneFilter>('all');
 
   useEffect(() => {
     let mounted = true;
@@ -31,10 +51,22 @@ export default function BuildingPanelsPage() {
         if (mounted) setLoading(false);
       }
     })();
-    return () => {
-      mounted = false;
-    };
+    return () => { mounted = false; };
   }, [id]);
+
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase().trim();
+    return panels.filter((p) => {
+      if (statusFilter !== 'all' && p.status !== statusFilter) return false;
+      if (zoneFilter === 'fire' && p.fire === 0) return false;
+      if (zoneFilter === 'fault' && p.fault === 0) return false;
+      if (zoneFilter === 'healthy' && (p.fire > 0 || p.fault > 0)) return false;
+      if (q && ![p.panel_name, p.panel_code].filter(Boolean).join(' ').toLowerCase().includes(q)) return false;
+      return true;
+    });
+  }, [panels, search, statusFilter, zoneFilter]);
+
+  const hasFilters = search || statusFilter !== 'all' || zoneFilter !== 'all';
 
   if (loading) return <div className="py-20 text-center text-muted-foreground">Loading…</div>;
   if (error) return <div className="rounded-md border border-crit-border bg-crit-bg px-4 py-3 text-sm text-crit-text">{error}</div>;
@@ -52,16 +84,69 @@ export default function BuildingPanelsPage() {
         </div>
       </Card>
 
-      <div>
-        <h3 className="text-lg font-semibold">Panels</h3>
-        <p className="text-sm text-muted-foreground">Open a panel to view its 20 zones</p>
+      {/* Header + filters */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-lg font-semibold">Panels</h3>
+            <p className="text-sm text-muted-foreground">
+              {filtered.length} of {panels.length} panel{panels.length !== 1 ? 's' : ''}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Search */}
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            <input
+              type="text"
+              placeholder="Search by name or code…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="h-8 w-52 rounded-md border border-border bg-background pl-8 pr-3 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+            />
+            {search && (
+              <button onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as PanelStatus | 'all')}
+            className="h-8 rounded-md border border-border bg-background px-2 text-xs text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+          >
+            {STATUS_OPTS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+
+          <select
+            value={zoneFilter}
+            onChange={(e) => setZoneFilter(e.target.value as ZoneFilter)}
+            className="h-8 rounded-md border border-border bg-background px-2 text-xs text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+          >
+            {ZONE_OPTS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+
+          {hasFilters && (
+            <button
+              onClick={() => { setSearch(''); setStatusFilter('all'); setZoneFilter('all'); }}
+              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+            >
+              <X className="h-3 w-3" /> Clear
+            </button>
+          )}
+        </div>
       </div>
 
-      {panels.length === 0 ? (
-        <Card className="border-dashed p-12 text-center text-sm text-muted-foreground">No panels in this building yet.</Card>
+      {filtered.length === 0 ? (
+        <Card className="border-dashed p-12 text-center text-sm text-muted-foreground">
+          {panels.length === 0 ? 'No panels in this building yet.' : 'No panels match your filters.'}
+        </Card>
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {panels.map((p) => {
+          {filtered.map((p) => {
             const meta = PANEL_STATUS_META[p.status] ?? PANEL_STATUS_META.NORMAL;
             const accent = p.fire > 0 ? 'border-l-crit-strong' : p.fault > 0 ? 'border-l-warn-strong' : 'border-l-ok-strong';
             return (
