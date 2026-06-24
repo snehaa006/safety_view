@@ -41,8 +41,7 @@ function ZoneCard({
   const sm = zoneStateMeta(zone.current_state);
   return (
     <Card className={cn('flex flex-col gap-2 border p-3', sm.tile)}>
-      <div className="flex items-center justify-between">
-        <span className="font-mono text-xs opacity-70">#{zone.zone_number}</span>
+      <div className="flex justify-end">
         <span className={cn('h-2.5 w-2.5 rounded-full', sm.dot)} />
       </div>
 
