@@ -552,6 +552,83 @@ export async function deletePanel(id: number): Promise<void> {
 // Zones
 // ---------------------------------------------------------------------------
 
+export interface ZoneWithContext extends Zone {
+  panel_code: string;
+  panel_name: string | null;
+  panel_status: string;
+  building_id: number;
+  building_name: string;
+}
+
+export async function fetchPanelsForUser(user: AuthUser | null): Promise<Panel[]> {
+  const ids = await visibleBuildingIds(user);
+  if (ids !== null && ids.length === 0) return [];
+  let q = supabase
+    .from('panels')
+    .select('id, building_id, panel_code, panel_name, status, notes, last_seen, buildings ( building_name )')
+    .order('panel_code');
+  if (ids !== null) q = q.in('building_id', ids);
+  const { data, error } = await q;
+  if (error) throw new Error(error.message);
+  const panels = (data ?? []) as any[];
+  const metric = await panelMetrics(panels.map((p) => p.id));
+  return panels.map((p) => ({
+    id: p.id,
+    building_id: p.building_id,
+    building_name: p.buildings?.building_name ?? null,
+    panel_code: p.panel_code,
+    panel_name: p.panel_name ?? null,
+    status: p.status,
+    notes: p.notes ?? null,
+    last_seen: p.last_seen ?? null,
+    ...metric[p.id],
+  }));
+}
+
+export async function fetchZonesByState(state: 'FIRE' | 'FAULT', user: AuthUser | null): Promise<ZoneWithContext[]> {
+  const ids = await visibleBuildingIds(user);
+  if (ids !== null && ids.length === 0) return [];
+
+  // get panels the user can see
+  let pq = supabase.from('panels').select('id, building_id, panel_code, panel_name, status, buildings ( building_name )');
+  if (ids !== null) pq = pq.in('building_id', ids);
+  const { data: panelData } = await pq;
+  const panels = (panelData ?? []) as any[];
+  if (panels.length === 0) return [];
+
+  const panelMap: Record<number, { panel_code: string; panel_name: string | null; panel_status: string; building_id: number; building_name: string }> = {};
+  for (const p of panels) {
+    panelMap[p.id] = {
+      panel_code: p.panel_code,
+      panel_name: p.panel_name ?? null,
+      panel_status: p.status,
+      building_id: p.building_id,
+      building_name: p.buildings?.building_name ?? 'Unknown',
+    };
+  }
+
+  const { data, error } = await supabase
+    .from('zones')
+    .select('id, panel_id, zone_number, zone_name, zone_type, current_state, current_reading, available_actions, updated_at')
+    .in('panel_id', panels.map((p) => p.id))
+    .eq('current_state', state)
+    .order('zone_number');
+  if (error) throw new Error(error.message);
+
+  return ((data ?? []) as any[]).map((z) => ({
+    id: z.id,
+    panel_id: z.panel_id,
+    zone_number: z.zone_number,
+    zone_name: z.zone_name,
+    zone_type: z.zone_type,
+    current_state: z.current_state,
+    current_reading: z.current_reading ?? null,
+    available_actions: (z.available_actions ?? []) as ManualAction[],
+    updated_at: z.updated_at ?? null,
+    ...panelMap[z.panel_id],
+  }));
+}
+
 export async function fetchZonesByPanel(panelId: number): Promise<Zone[]> {
   const { data, error } = await supabase
     .from('zones')

@@ -42,8 +42,8 @@ export default function BuildingPanelsPage() {
   return (
     <section className="space-y-5">
       <Card className="flex flex-wrap items-center gap-4 p-4">
-        <button onClick={() => navigate('/buildings')} className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-3 py-1.5 text-sm font-semibold hover:bg-secondary">
-          <ChevronLeft className="h-4 w-4" /> All Buildings
+        <button onClick={() => navigate('/all-buildings')} className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-3 py-1.5 text-sm font-semibold hover:bg-secondary">
+          <ChevronLeft className="h-4 w-4" /> Buildings
         </button>
         <div className="flex flex-wrap items-center gap-3">
           <span className="font-bold">{building?.building_name}</span>
