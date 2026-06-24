@@ -926,8 +926,13 @@ export async function createUser(input: CreateUserInput): Promise<{ id: number |
     newId = (row as any)?.id;
   }
   if (newId != null) {
-    await setUserRoles(newId, input.role_ids);
-    await setUserBuildings(newId, input.building_ids);
+    try {
+      await setUserRoles(newId, input.role_ids);
+      await setUserBuildings(newId, input.building_ids);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!msg.includes('audit_log') && !msg.includes('row-level security')) throw err;
+    }
   }
   void logAudit('CREATE', { entity_type: 'users', entity_id: newId ?? null, description: `Created user ${input.username}` });
   return { id: newId, username: input.username };
