@@ -1,216 +1,112 @@
-import { useEffect, useState } from 'react';
-import { Plus, X } from 'lucide-react';
-import {
-  fetchOrganizations,
-  createOrganization,
-  updateOrganization,
-  deleteOrganization,
-} from '@/services/api';
+import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Plus, Search, X } from 'lucide-react';
+import { fetchOrganizations } from '@/services/api';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { formatDate } from '@/utils/format';
 import type { Organization } from '@/types';
 
 export default function OrganizationsPage() {
+  const navigate = useNavigate();
   const [orgs, setOrgs] = useState<Organization[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
-
-  const [showForm, setShowForm] = useState(false);
-  const [editingId, setEditingId] = useState<number | null>(null);
-  const [name, setName] = useState('');
-  const [logo, setLogo] = useState('');
-  const [active, setActive] = useState(true);
-  const [formError, setFormError] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-
-  const [deleteTarget, setDeleteTarget] = useState<Organization | null>(null);
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
 
   useEffect(() => {
-    load();
+    fetchOrganizations()
+      .then(setOrgs)
+      .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load organizations'))
+      .finally(() => setLoading(false));
   }, []);
 
-  async function load() {
-    try {
-      setLoading(true);
-      setOrgs(await fetchOrganizations());
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load organizations');
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  function openCreate() {
-    setEditingId(null);
-    setName('');
-    setLogo('');
-    setActive(true);
-    setFormError('');
-    setSuccess('');
-    setShowForm(true);
-  }
-
-  function openEdit(o: Organization) {
-    setEditingId(o.id);
-    setName(o.organization_name);
-    setLogo(o.logo_path || '');
-    setActive(o.is_active);
-    setFormError('');
-    setSuccess('');
-    setShowForm(true);
-  }
-
-  async function handleSubmit() {
-    if (!name.trim()) return setFormError('Organization name is required.');
-    try {
-      setSubmitting(true);
-      if (editingId) {
-        await updateOrganization(editingId, { organization_name: name.trim(), logo_path: logo.trim(), is_active: active });
-        setSuccess('Organization updated.');
-      } else {
-        await createOrganization({ organization_name: name.trim(), logo_path: logo.trim(), is_active: active });
-        setSuccess('Organization created.');
-      }
-      setShowForm(false);
-      await load();
-    } catch (err) {
-      setFormError(err instanceof Error ? err.message : 'Failed to save organization.');
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  async function confirmDelete() {
-    if (!deleteTarget) return;
-    try {
-      await deleteOrganization(deleteTarget.id);
-      setSuccess('Organization deleted.');
-      setDeleteTarget(null);
-      await load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete organization.');
-      setDeleteTarget(null);
-    }
-  }
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase().trim();
+    return orgs.filter((o) => {
+      if (statusFilter === 'active' && !o.is_active) return false;
+      if (statusFilter === 'inactive' && o.is_active) return false;
+      if (q && !o.organization_name.toLowerCase().includes(q)) return false;
+      return true;
+    });
+  }, [orgs, search, statusFilter]);
 
   return (
     <section className="space-y-4">
-      <div className="flex items-start justify-between gap-3">
+      <div className="flex items-center justify-between gap-3">
         <div>
           <h3 className="text-lg font-bold">Organizations</h3>
-          <p className="text-sm text-muted-foreground">Create and manage organizations</p>
+          <p className="text-sm text-muted-foreground">{filtered.length} of {orgs.length} organization{orgs.length !== 1 ? 's' : ''}</p>
         </div>
-        <Button onClick={showForm ? () => setShowForm(false) : openCreate}>
-          {showForm ? <><X className="h-4 w-4" /> Cancel</> : <><Plus className="h-4 w-4" /> Add Organization</>}
-        </Button>
+        <Button onClick={() => navigate('/organizations/new')}><Plus className="h-4 w-4" /> Add Organization</Button>
       </div>
 
-      {success && <div className="rounded-md border border-ok-border bg-ok-bg px-4 py-2 text-sm text-ok-text">{success}</div>}
       {error && <div className="rounded-md border border-crit-border bg-crit-bg px-4 py-2 text-sm text-crit-text">{error}</div>}
 
-      {showForm && (
-        <Card className="p-6">
-          <h4 className="mb-4 font-semibold">{editingId ? 'Edit Organization' : 'New Organization'}</h4>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div className="flex flex-col gap-1.5">
-              <Label>Name</Label>
-              <Input value={name} onChange={(e) => { setName(e.target.value); setFormError(''); }} placeholder="e.g. Agnicomm" />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label>Logo Path (optional)</Label>
-              <Input value={logo} onChange={(e) => setLogo(e.target.value)} placeholder="https://…" />
-            </div>
-            <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} />
-              Active
-            </label>
-          </div>
-          <div className="mt-4 flex items-center justify-end gap-3">
-            {formError && <span className="text-sm font-medium text-crit-text">{formError}</span>}
-            <Button onClick={handleSubmit} disabled={submitting}>
-              {submitting ? 'Saving…' : editingId ? 'Save Changes' : 'Create Organization'}
-            </Button>
-          </div>
-        </Card>
-      )}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative">
+          <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <input
+            type="text"
+            placeholder="Search name…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="h-8 w-52 rounded-md border border-border bg-background pl-8 pr-3 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+          />
+          {search && (
+            <button onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+        <select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value as 'all' | 'active' | 'inactive')}
+          className="h-8 rounded-md border border-border bg-background px-2 text-xs text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+        >
+          <option value="all">All statuses</option>
+          <option value="active">Active</option>
+          <option value="inactive">Inactive</option>
+        </select>
+        {(search || statusFilter !== 'all') && (
+          <button onClick={() => { setSearch(''); setStatusFilter('all'); }} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
+            <X className="h-3 w-3" /> Clear
+          </button>
+        )}
+      </div>
 
       <Card>
-        {loading ? (
-          <div className="p-6 text-center text-sm text-muted-foreground">Loading…</div>
-        ) : (
+        {loading ? <div className="p-6 text-center text-sm text-muted-foreground">Loading…</div> : (
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>ID</TableHead>
                 <TableHead>Name</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Created</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {orgs.map((o) => (
-                <TableRow key={o.id}>
-                  <TableCell className="text-muted-foreground">{o.id}</TableCell>
+              {filtered.map((o) => (
+                <TableRow key={o.id} className="cursor-pointer hover:bg-secondary/50" onClick={() => navigate(`/organizations/${o.id}`)}>
                   <TableCell className="font-semibold">{o.organization_name}</TableCell>
-                  <TableCell>
-                    <Badge variant={o.is_active ? 'ok' : 'off'}>{o.is_active ? 'Active' : 'Inactive'}</Badge>
-                  </TableCell>
+                  <TableCell><Badge variant={o.is_active ? 'ok' : 'off'}>{o.is_active ? 'Active' : 'Inactive'}</Badge></TableCell>
                   <TableCell className="text-muted-foreground">{formatDate(o.created_at)}</TableCell>
-                  <TableCell>
-                    <div className="flex justify-end gap-2">
-                      <Button variant="outline" size="sm" onClick={() => openEdit(o)}>Edit</Button>
-                      <Button variant="destructive" size="sm" onClick={() => setDeleteTarget(o)}>Delete</Button>
-                    </div>
-                  </TableCell>
                 </TableRow>
               ))}
-              {orgs.length === 0 && (
+              {filtered.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={5} className="py-6 text-center text-muted-foreground">No organizations yet.</TableCell>
+                  <TableCell colSpan={3} className="py-8 text-center text-muted-foreground">
+                    {orgs.length === 0 ? 'No organizations yet.' : 'No organizations match your filters.'}
+                  </TableCell>
                 </TableRow>
               )}
             </TableBody>
           </Table>
         )}
       </Card>
-
-      <Dialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Delete organization?</DialogTitle>
-            <DialogDescription>
-              Delete <strong>{deleteTarget?.organization_name}</strong>? Users linked to it will keep their record
-              but lose the organization reference.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteTarget(null)}>Cancel</Button>
-            <Button variant="destructive" onClick={confirmDelete}>Delete</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </section>
   );
 }

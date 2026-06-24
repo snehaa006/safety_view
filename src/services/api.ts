@@ -212,6 +212,12 @@ export async function deleteRole(id: number): Promise<void> {
   void logAudit('DELETE', { entity_type: 'roles', entity_id: id });
 }
 
+export async function fetchRoleById(id: number): Promise<Role | null> {
+  const { data, error } = await supabase.from('roles').select('id, role_name, description').eq('id', id).maybeSingle();
+  if (error || !data) return null;
+  return data as Role;
+}
+
 // ---------------------------------------------------------------------------
 // Organizations
 // ---------------------------------------------------------------------------
@@ -248,6 +254,16 @@ export async function deleteOrganization(id: number): Promise<void> {
   void logAudit('DELETE', { entity_type: 'organizations', entity_id: id });
 }
 
+export async function fetchOrganizationById(id: number): Promise<Organization | null> {
+  const { data, error } = await supabase
+    .from('organizations')
+    .select('id, organization_name, logo_path, is_active, created_at')
+    .eq('id', id)
+    .maybeSingle();
+  if (error || !data) return null;
+  return data as Organization;
+}
+
 // ---------------------------------------------------------------------------
 // Groups
 // ---------------------------------------------------------------------------
@@ -279,6 +295,12 @@ export async function deleteGroup(id: number): Promise<void> {
   const { error } = await supabase.from('groups').delete().eq('id', id);
   if (error) throw new Error(error.message);
   void logAudit('DELETE', { entity_type: 'groups', entity_id: id });
+}
+
+export async function fetchGroupById(id: number): Promise<Group | null> {
+  const { data, error } = await supabase.from('groups').select('id, group_name, description').eq('id', id).maybeSingle();
+  if (error || !data) return null;
+  return data as Group;
 }
 
 // ---------------------------------------------------------------------------
@@ -313,6 +335,16 @@ export async function deleteLocation(id: number): Promise<void> {
   const { error } = await supabase.from('locations').delete().eq('id', id);
   if (error) throw new Error(error.message);
   void logAudit('DELETE', { entity_type: 'locations', entity_id: id });
+}
+
+export async function fetchLocationById(id: number): Promise<Location | null> {
+  const { data, error } = await supabase
+    .from('locations')
+    .select('id, address, city, state, country, postal_code, latitude, longitude')
+    .eq('id', id)
+    .maybeSingle();
+  if (error || !data) return null;
+  return data as Location;
 }
 
 // ---------------------------------------------------------------------------
