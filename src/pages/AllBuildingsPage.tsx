@@ -1,12 +1,32 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Building2, ChevronLeft, LayoutGrid, List } from 'lucide-react';
+import { Building2, ChevronLeft, LayoutGrid, List, Search, X } from 'lucide-react';
 import { fetchBuildings, locationLabel } from '@/services/api';
 import { useAuth } from '@/context/AuthContext';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import type { Building } from '@/types';
+
+type StatusFilter = 'all' | 'fire' | 'fault' | 'healthy';
+
+const STATUS_OPTIONS: { value: StatusFilter; label: string; cls: string; active: string }[] = [
+  { value: 'all',     label: 'All',     cls: 'border-border text-muted-foreground hover:bg-secondary',    active: 'bg-secondary text-foreground border-border' },
+  { value: 'fire',    label: 'Fire',    cls: 'border-crit-border text-crit-text hover:bg-crit-bg',        active: 'bg-crit-bg text-crit-strong border-crit-border' },
+  { value: 'fault',   label: 'Fault',   cls: 'border-warn-border text-warn-text hover:bg-warn-bg',        active: 'bg-warn-bg text-warn-strong border-warn-border' },
+  { value: 'healthy', label: 'Healthy', cls: 'border-ok-border text-ok-text hover:bg-ok-bg',              active: 'bg-ok-bg text-ok-strong border-ok-border' },
+];
+
+function FilterChip({ opt, active, onClick }: { opt: typeof STATUS_OPTIONS[0]; active: boolean; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className={cn('rounded-full border px-3 py-1 text-xs font-medium transition-colors', active ? opt.active : opt.cls)}
+    >
+      {opt.label}
+    </button>
+  );
+}
 
 export default function AllBuildingsPage() {
   const { user } = useAuth();
@@ -15,6 +35,9 @@ export default function AllBuildingsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [groupFilter, setGroupFilter] = useState('');
 
   useEffect(() => {
     let mounted = true;
@@ -31,11 +54,55 @@ export default function AllBuildingsPage() {
     return () => { mounted = false; };
   }, [user]);
 
+  const groups = useMemo(() => {
+    const seen = new Set<string>();
+    const result: string[] = [];
+    for (const b of buildings) {
+      if (b.group_name && !seen.has(b.group_name)) {
+        seen.add(b.group_name);
+        result.push(b.group_name);
+      }
+    }
+    return result.sort();
+  }, [buildings]);
+
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase().trim();
+    return buildings.filter((b) => {
+      if (statusFilter === 'fire' && b.fire === 0) return false;
+      if (statusFilter === 'fault' && b.fault === 0) return false;
+      if (statusFilter === 'healthy' && (b.fire > 0 || b.fault > 0)) return false;
+      if (groupFilter && b.group_name !== groupFilter) return false;
+      if (q) {
+        const loc = b.location;
+        const haystack = [
+          b.building_name,
+          loc?.city,
+          loc?.address,
+          loc?.state,
+          loc?.country,
+          b.group_name,
+        ].filter(Boolean).join(' ').toLowerCase();
+        if (!haystack.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [buildings, search, statusFilter, groupFilter]);
+
+  const hasFilters = search || statusFilter !== 'all' || groupFilter;
+
+  function clearFilters() {
+    setSearch('');
+    setStatusFilter('all');
+    setGroupFilter('');
+  }
+
   if (loading) return <div className="py-20 text-center text-muted-foreground">Loading buildings…</div>;
   if (error) return <div className="rounded-md border border-crit-border bg-crit-bg px-4 py-3 text-sm text-crit-text">{error}</div>;
 
   return (
-    <section className="space-y-5">
+    <section className="space-y-4">
+      {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <button
@@ -46,7 +113,9 @@ export default function AllBuildingsPage() {
           </button>
           <div>
             <h3 className="text-lg font-semibold">All Buildings</h3>
-            <p className="text-sm text-muted-foreground">{buildings.length} building{buildings.length !== 1 ? 's' : ''} in your scope</p>
+            <p className="text-sm text-muted-foreground">
+              {filtered.length} of {buildings.length} building{buildings.length !== 1 ? 's' : ''}
+            </p>
           </div>
         </div>
         <div className="flex items-center gap-1 rounded-md border border-border bg-background p-1">
@@ -67,13 +136,60 @@ export default function AllBuildingsPage() {
         </div>
       </div>
 
-      {buildings.length === 0 ? (
+      {/* Filters */}
+      <div className="flex flex-wrap items-center gap-2">
+        {/* Search */}
+        <div className="relative">
+          <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <input
+            type="text"
+            placeholder="Search by name, city, address…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="h-8 w-60 rounded-md border border-border bg-background pl-8 pr-3 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+          />
+          {search && (
+            <button onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+
+        {/* Status chips */}
+        <div className="flex items-center gap-1.5">
+          {STATUS_OPTIONS.map((opt) => (
+            <FilterChip key={opt.value} opt={opt} active={statusFilter === opt.value} onClick={() => setStatusFilter(opt.value)} />
+          ))}
+        </div>
+
+        {/* Group dropdown */}
+        {groups.length > 0 && (
+          <select
+            value={groupFilter}
+            onChange={(e) => setGroupFilter(e.target.value)}
+            className="h-8 rounded-md border border-border bg-background px-2 text-xs text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+          >
+            <option value="">All groups</option>
+            {groups.map((g) => <option key={g} value={g}>{g}</option>)}
+          </select>
+        )}
+
+        {/* Clear */}
+        {hasFilters && (
+          <button onClick={clearFilters} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
+            <X className="h-3 w-3" /> Clear
+          </button>
+        )}
+      </div>
+
+      {/* Results */}
+      {filtered.length === 0 ? (
         <Card className="border-dashed p-12 text-center text-sm text-muted-foreground">
-          No buildings are assigned to your account yet.
+          {buildings.length === 0 ? 'No buildings are assigned to your account yet.' : 'No buildings match your filters.'}
         </Card>
       ) : viewMode === 'grid' ? (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {buildings.map((b) => {
+          {filtered.map((b) => {
             const accent = b.fire > 0 ? 'border-l-crit-strong' : b.fault > 0 ? 'border-l-warn-strong' : 'border-l-ok-strong';
             return (
               <Card
@@ -100,7 +216,7 @@ export default function AllBuildingsPage() {
         </div>
       ) : (
         <div className="flex flex-col gap-2">
-          {buildings.map((b) => {
+          {filtered.map((b) => {
             const accent = b.fire > 0 ? 'border-l-crit-strong' : b.fault > 0 ? 'border-l-warn-strong' : 'border-l-ok-strong';
             return (
               <Card
