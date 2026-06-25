@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Plus, Search, X } from 'lucide-react';
 import { fetchUsers, fetchRoles, toggleUserActive, deleteUser } from '@/services/api';
+import ConfirmDialog from '@/components/ui/confirm-dialog';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -36,6 +37,8 @@ export default function UserManagementPage() {
   const [confirmName, setConfirmName] = useState('');
   const [confirmAck, setConfirmAck] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [toggleTarget, setToggleTarget] = useState<ManagedUser | null>(null);
+  const [toggling, setToggling] = useState(false);
 
   useEffect(() => { loadAll(); }, []);
   async function loadAll() {
@@ -69,9 +72,15 @@ export default function UserManagementPage() {
     });
   }, [users, query, roleFilter, orgFilter, statusFilter]);
 
-  async function handleToggle(u: ManagedUser) {
-    try { await toggleUserActive(u.id, !u.is_active); setUsers((p) => p.map((x) => x.id === u.id ? { ...x, is_active: !x.is_active } : x)); }
-    catch (err) { setError(err instanceof Error ? err.message : 'Failed to update'); }
+  async function confirmToggle() {
+    if (!toggleTarget) return;
+    try {
+      setToggling(true);
+      await toggleUserActive(toggleTarget.id, !toggleTarget.is_active);
+      setUsers((p) => p.map((x) => x.id === toggleTarget.id ? { ...x, is_active: !x.is_active } : x));
+      setToggleTarget(null);
+    } catch (err) { setError(err instanceof Error ? err.message : 'Failed to update'); }
+    finally { setToggling(false); }
   }
   function openDelete(u: ManagedUser) { setDeleteTarget(u); setConfirmName(''); setConfirmAck(false); }
   async function confirmDelete() {
@@ -163,7 +172,7 @@ export default function UserManagementPage() {
                     <td className="sticky right-0 bg-card" onClick={(e) => e.stopPropagation()}>
                       <div className="flex justify-end gap-2">
                         <Button variant="outline" size="sm" onClick={() => navigate(`/users/${u.id}/edit`)}>Edit</Button>
-                        <Button variant="outline" size="sm" onClick={() => handleToggle(u)}>{u.is_active ? 'Disable' : 'Enable'}</Button>
+                        <Button variant="outline" size="sm" onClick={() => setToggleTarget(u)}>{u.is_active ? 'Disable' : 'Enable'}</Button>
                         <Button variant="destructive" size="sm" onClick={() => openDelete(u)}>Delete</Button>
                       </div>
                     </td>
@@ -197,6 +206,21 @@ export default function UserManagementPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog
+        open={!!toggleTarget}
+        onOpenChange={(o) => !o && setToggleTarget(null)}
+        title={toggleTarget?.is_active ? 'Disable user?' : 'Enable user?'}
+        description={
+          toggleTarget?.is_active
+            ? `Disable "${toggleTarget?.username}"? They will no longer be able to log in.`
+            : `Enable "${toggleTarget?.username}"? They will regain access.`
+        }
+        confirmLabel={toggleTarget?.is_active ? 'Disable' : 'Enable'}
+        variant={toggleTarget?.is_active ? 'destructive' : 'default'}
+        onConfirm={confirmToggle}
+        loading={toggling}
+      />
     </section>
   );
 }

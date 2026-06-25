@@ -17,6 +17,7 @@ import {
 } from '@/components/ui/select';
 import type { Building, ManagedUser, Organization, Role } from '@/types';
 import { LoadingScreen } from '@/components/ui/spinner';
+import ConfirmDialog from '@/components/ui/confirm-dialog';
 
 interface FormState {
   username: string;
@@ -54,6 +55,7 @@ export default function UserFormPage() {
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<Errors>({});
   const [submitError, setSubmitError] = useState('');
+  const [showConfirm, setShowConfirm] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -103,9 +105,14 @@ export default function UserFormPage() {
     return Object.keys(e).length === 0;
   }
 
-  async function handleSubmit() {
+  function handleSaveClick() {
     setSubmitError('');
     if (!validate()) return;
+    setShowConfirm(true);
+  }
+
+  async function handleSubmit() {
+    setShowConfirm(false);
     const orgId = form.organization_id ? Number(form.organization_id) : null;
     const parentId = form.parent_user_id ? Number(form.parent_user_id) : null;
     try {
@@ -217,9 +224,19 @@ export default function UserFormPage() {
 
         <div className="mt-6 flex items-center justify-end gap-3">
           <Button variant="outline" onClick={() => navigate('/users')}>Cancel</Button>
-          <Button onClick={handleSubmit} disabled={submitting || !isDirty}>{submitting ? 'Saving…' : isEditing ? 'Save Changes' : 'Create User'}</Button>
+          <Button onClick={handleSaveClick} disabled={submitting || !isDirty}>{submitting ? 'Saving…' : isEditing ? 'Save Changes' : 'Create User'}</Button>
         </div>
       </Card>
+
+      <ConfirmDialog
+        open={showConfirm}
+        onOpenChange={setShowConfirm}
+        title={isEditing ? 'Save changes?' : 'Create user?'}
+        description={isEditing ? `Save changes to user "${form.username}"?` : `Create a new user "${form.username.trim()}"?`}
+        confirmLabel={isEditing ? 'Save Changes' : 'Create User'}
+        onConfirm={handleSubmit}
+        loading={submitting}
+      />
     </section>
   );
 }

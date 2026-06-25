@@ -215,6 +215,18 @@ export interface ScopeMetrics {
   isolation: number;
 }
 
+export interface AlarmReportRow {
+  s_no: number;
+  building_name: string | null;
+  panel_name: string;
+  panel_code: string;
+  zone_name: string;
+  zone_number: number;
+  previous_state: string;
+  new_state: string;
+  created_at: string;
+}
+
 export interface CreateUserInput {
   username: string;
   email: string;

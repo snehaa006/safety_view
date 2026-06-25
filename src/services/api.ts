@@ -1109,3 +1109,85 @@ export async function saveAppSettings(settings: Partial<AppSettings>): Promise<v
   const { error } = await supabase.from('app_settings').upsert({ id: 1, ...settings, updated_at: new Date().toISOString() });
   if (error) throw new Error(error.message);
 }
+
+// ---------------------------------------------------------------------------
+// Reports
+// ---------------------------------------------------------------------------
+
+export async function fetchAlarmReportData(
+  panelIds: number[] | null, // null = all panels
+  startDate: string,
+  endDate: string,
+): Promise<import('@/types').AlarmReportRow[]> {
+  let panelList: Panel[];
+  if (panelIds === null) {
+    panelList = await fetchAllPanels();
+  } else {
+    if (panelIds.length === 0) return [];
+    const { data, error } = await supabase
+      .from('panels')
+      .select('id, building_id, panel_code, panel_name, buildings(building_name)')
+      .in('id', panelIds);
+    if (error) throw new Error(error.message);
+    panelList = ((data ?? []) as any[]).map((p) => ({
+      id: p.id,
+      building_id: p.building_id,
+      building_name: p.buildings?.building_name ?? null,
+      panel_code: p.panel_code,
+      panel_name: p.panel_name ?? null,
+      status: 'NORMAL' as import('@/types').PanelStatus,
+      notes: null,
+      last_seen: null,
+      zoneCount: 0,
+      fire: 0,
+      fault: 0,
+    }));
+  }
+
+  const panelMap: Record<number, Panel> = {};
+  const allPanelIds: number[] = [];
+  for (const p of panelList) {
+    panelMap[p.id] = p;
+    allPanelIds.push(p.id);
+  }
+  if (allPanelIds.length === 0) return [];
+
+  const { data: zonesData, error: zonesError } = await supabase
+    .from('zones')
+    .select('id, panel_id, zone_number, zone_name')
+    .in('panel_id', allPanelIds);
+  if (zonesError) throw new Error(zonesError.message);
+
+  const zoneMap: Record<number, { panel_id: number; zone_number: number; zone_name: string }> = {};
+  const zoneIds: number[] = [];
+  for (const z of (zonesData ?? []) as any[]) {
+    zoneMap[z.id] = { panel_id: z.panel_id, zone_number: z.zone_number, zone_name: z.zone_name };
+    zoneIds.push(z.id);
+  }
+  if (zoneIds.length === 0) return [];
+
+  const { data: events, error: eventsError } = await supabase
+    .from('zone_events')
+    .select('id, zone_id, previous_state, new_state, created_at')
+    .in('zone_id', zoneIds)
+    .gte('created_at', startDate)
+    .lte('created_at', endDate)
+    .order('created_at', { ascending: false });
+  if (eventsError) throw new Error(eventsError.message);
+
+  return ((events ?? []) as any[]).map((e, i) => {
+    const zone = zoneMap[e.zone_id];
+    const panel = zone ? panelMap[zone.panel_id] : null;
+    return {
+      s_no: i + 1,
+      building_name: panel?.building_name ?? null,
+      panel_name: panel?.panel_name || panel?.panel_code || 'Unknown',
+      panel_code: panel?.panel_code ?? 'Unknown',
+      zone_name: zone?.zone_name ?? `Zone ${e.zone_id}`,
+      zone_number: zone?.zone_number ?? 0,
+      previous_state: e.previous_state,
+      new_state: e.new_state,
+      created_at: e.created_at,
+    };
+  });
+}
