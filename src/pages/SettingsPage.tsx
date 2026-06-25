@@ -35,8 +35,9 @@ export default function SettingsPage() {
     else localStorage.removeItem(APP_NAME_KEY);
     if (appLogo.trim()) localStorage.setItem(APP_LOGO_KEY, appLogo.trim());
     else localStorage.removeItem(APP_LOGO_KEY);
-    setBrandingMsg('Branding saved. Reload to see changes in the sidebar.');
-    setTimeout(() => setBrandingMsg(''), 4000);
+    window.dispatchEvent(new Event('sv_branding_update'));
+    setBrandingMsg('Branding saved.');
+    setTimeout(() => setBrandingMsg(''), 3000);
   }
 
   // alert prefs
