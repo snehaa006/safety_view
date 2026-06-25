@@ -1,10 +1,10 @@
-import { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import {
   Bell, Building2, ClipboardList, Cpu, Droplet, FolderTree, KeyRound,
   LogIn, MapPin, ShieldCheck, User, Users, Warehouse,
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
+import { useAppSettings } from '@/context/AppSettingsContext';
 import { isAdminUser } from '@/lib/roles';
 import { cn } from '@/lib/utils';
 
@@ -33,31 +33,15 @@ const NAV_ITEMS: NavItem[] = [
 
 export default function Sidebar() {
   const { user } = useAuth();
+  const { appName, logoData } = useAppSettings();
   const isAdmin = isAdminUser(user);
   const items = NAV_ITEMS.filter((i) => !i.adminOnly || isAdmin);
-  const [appName, setAppName] = useState(() => localStorage.getItem('sv_app_name') || 'SafetyView');
-  const [appLogo, setAppLogo] = useState(() => localStorage.getItem('sv_app_logo') || '');
-
-  useEffect(() => {
-    function onStorage(e: StorageEvent) {
-      if (e.key === 'sv_app_name') setAppName(e.newValue || 'SafetyView');
-      if (e.key === 'sv_app_logo') setAppLogo(e.newValue || '');
-    }
-    window.addEventListener('storage', onStorage);
-    // also listen for same-tab updates via a custom event
-    function onBrandingUpdate() {
-      setAppName(localStorage.getItem('sv_app_name') || 'SafetyView');
-      setAppLogo(localStorage.getItem('sv_app_logo') || '');
-    }
-    window.addEventListener('sv_branding_update', onBrandingUpdate);
-    return () => { window.removeEventListener('storage', onStorage); window.removeEventListener('sv_branding_update', onBrandingUpdate); };
-  }, []);
 
   return (
     <aside className="sticky top-0 hidden h-screen w-56 flex-shrink-0 flex-col border-r border-border bg-card md:flex">
       <div className="flex items-center gap-2 border-b border-border px-5 py-5">
-        {appLogo ? (
-          <img src={appLogo} alt="Logo" className="h-8 w-8 rounded-md object-contain" />
+        {logoData ? (
+          <img src={logoData} alt="Logo" className="h-8 w-8 rounded-md object-contain" />
         ) : (
           <div className="flex h-8 w-8 items-center justify-center rounded-md border border-water-border bg-water-bg">
             <Droplet className="h-4 w-4 text-accent" />

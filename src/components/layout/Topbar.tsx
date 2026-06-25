@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { useLocation, matchPath, useNavigate } from 'react-router-dom';
 import { LogOut } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
+import { useAppSettings } from '@/context/AppSettingsContext';
 import { Button } from '@/components/ui/button';
 
 function titleForPath(pathname: string): string {
@@ -53,15 +54,9 @@ function titleForPath(pathname: string): string {
 
 export default function Topbar() {
   const { user, logout } = useAuth();
+  const { appName } = useAppSettings();
   const { pathname } = useLocation();
   const navigate = useNavigate();
-  const [appName, setAppName] = useState(() => localStorage.getItem('sv_app_name') || 'SafetyView');
-
-  useEffect(() => {
-    function onUpdate() { setAppName(localStorage.getItem('sv_app_name') || 'SafetyView'); }
-    window.addEventListener('sv_branding_update', onUpdate);
-    return () => window.removeEventListener('sv_branding_update', onUpdate);
-  }, []);
 
   const pageTitle = titleForPath(pathname);
 

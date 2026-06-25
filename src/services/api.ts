@@ -1090,3 +1090,22 @@ export async function fetchAuditLog(limit = 200): Promise<AuditLogEntry[]> {
     created_at: r.created_at,
   }));
 }
+
+// ---------------------------------------------------------------------------
+// App Settings
+// ---------------------------------------------------------------------------
+
+export interface AppSettings {
+  app_name: string | null;
+  logo_data: string | null;
+}
+
+export async function fetchAppSettings(): Promise<AppSettings> {
+  const { data } = await supabase.from('app_settings').select('app_name, logo_data').eq('id', 1).maybeSingle();
+  return { app_name: (data as any)?.app_name ?? null, logo_data: (data as any)?.logo_data ?? null };
+}
+
+export async function saveAppSettings(settings: Partial<AppSettings>): Promise<void> {
+  const { error } = await supabase.from('app_settings').upsert({ id: 1, ...settings, updated_at: new Date().toISOString() });
+  if (error) throw new Error(error.message);
+}
