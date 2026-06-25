@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import type { Building, PanelStatus } from '@/types';
+import { LoadingScreen } from '@/components/ui/spinner';
 
 const STATUSES: PanelStatus[] = ['NORMAL', 'ALARM', 'FAULT', 'OFFLINE'];
 
@@ -60,7 +61,7 @@ export default function PanelAdminFormPage() {
     }
   }
 
-  if (loading) return <div className="py-20 text-center text-muted-foreground">Loading…</div>;
+  if (loading) return <LoadingScreen />;
 
   return (
     <section className="mx-auto max-w-xl space-y-4">

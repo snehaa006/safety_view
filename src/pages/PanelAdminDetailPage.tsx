@@ -10,6 +10,7 @@ import {
 } from '@/components/ui/dialog';
 import { PANEL_STATUS_META, formatDateTime } from '@/utils/format';
 import type { Panel } from '@/types';
+import { LoadingScreen } from '@/components/ui/spinner';
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -42,7 +43,7 @@ export default function PanelAdminDetailPage() {
     }
   }
 
-  if (loading) return <div className="py-20 text-center text-muted-foreground">Loading…</div>;
+  if (loading) return <LoadingScreen />;
   if (!panel) return <div className="py-20 text-center text-muted-foreground">Panel not found.</div>;
 
   const meta = PANEL_STATUS_META[panel.status] ?? PANEL_STATUS_META.NORMAL;

@@ -8,6 +8,7 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
 import type { Location } from '@/types';
+import { LoadingScreen } from '@/components/ui/spinner';
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -40,7 +41,7 @@ export default function LocationDetailPage() {
     }
   }
 
-  if (loading) return <div className="py-20 text-center text-muted-foreground">Loading…</div>;
+  if (loading) return <LoadingScreen />;
   if (!location) return <div className="py-20 text-center text-muted-foreground">Location not found.</div>;
 
   const title = [location.address, location.city, location.country].filter(Boolean).join(', ') || `Location #${location.id}`;

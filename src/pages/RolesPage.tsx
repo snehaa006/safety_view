@@ -6,6 +6,7 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import type { Role } from '@/types';
+import { LoadingScreen } from '@/components/ui/spinner';
 
 export default function RolesPage() {
   const navigate = useNavigate();
@@ -58,7 +59,7 @@ export default function RolesPage() {
       </div>
 
       <Card>
-        {loading ? <div className="p-6 text-center text-sm text-muted-foreground">Loading…</div> : (
+        {loading ? <LoadingScreen /> : (
           <Table>
             <TableHeader>
               <TableRow>

@@ -17,6 +17,7 @@ import {
 import Highlight from '@/components/common/Highlight';
 import { formatDate, formatDateTime } from '@/utils/format';
 import type { ManagedUser, Role } from '@/types';
+import { LoadingScreen } from '@/components/ui/spinner';
 
 export default function UserManagementPage() {
   const navigate = useNavigate();
@@ -129,7 +130,7 @@ export default function UserManagementPage() {
       </Card>
 
       <Card className="overflow-hidden">
-        {loading ? <div className="p-6 text-center text-sm text-muted-foreground">Loading…</div> : (
+        {loading ? <LoadingScreen /> : (
           <div className="max-h-[68vh] overflow-auto">
             <table className="w-full text-sm">
               <thead className="sticky top-0 z-10 bg-secondary">

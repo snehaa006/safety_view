@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { ChevronLeft, Cpu, Search, X } from 'lucide-react';
 import { fetchBuildingById, fetchPanelsByBuilding, locationLabel } from '@/services/api';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { LoadingScreen } from '@/components/ui/spinner';
 import { PANEL_STATUS_META } from '@/utils/format';
 import { cn } from '@/lib/utils';
 import type { Building, Panel, PanelStatus } from '@/types';
@@ -11,17 +12,17 @@ import type { Building, Panel, PanelStatus } from '@/types';
 type ZoneFilter = 'all' | 'fire' | 'fault' | 'healthy';
 
 const STATUS_OPTS: { value: PanelStatus | 'all'; label: string }[] = [
-  { value: 'all',     label: 'All statuses' },
-  { value: 'NORMAL',  label: 'Normal' },
-  { value: 'ALARM',   label: 'Alarm' },
-  { value: 'FAULT',   label: 'Fault' },
+  { value: 'all', label: 'All statuses' },
+  { value: 'NORMAL', label: 'Normal' },
+  { value: 'ALARM', label: 'Alarm' },
+  { value: 'FAULT', label: 'Fault' },
   { value: 'OFFLINE', label: 'Offline' },
 ];
 
 const ZONE_OPTS: { value: ZoneFilter; label: string }[] = [
-  { value: 'all',     label: 'All zones' },
-  { value: 'fire',    label: 'Has fire' },
-  { value: 'fault',   label: 'Has fault' },
+  { value: 'all', label: 'All zones' },
+  { value: 'fire', label: 'Has fire' },
+  { value: 'fault', label: 'Has fault' },
   { value: 'healthy', label: 'Clean' },
 ];
 
@@ -29,13 +30,30 @@ export default function BuildingPanelsPage() {
   const { buildingId } = useParams();
   const id = Number(buildingId);
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+
   const [building, setBuilding] = useState<Building | null>(null);
   const [panels, setPanels] = useState<Panel[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<PanelStatus | 'all'>('all');
-  const [zoneFilter, setZoneFilter] = useState<ZoneFilter>('all');
+
+  const [search, setSearch] = useState(searchParams.get('q') || '');
+  const [statusFilter, setStatusFilter] = useState<PanelStatus | 'all'>((searchParams.get('status') as PanelStatus | 'all') || 'all');
+  const [zoneFilter, setZoneFilter] = useState<ZoneFilter>((searchParams.get('zones') as ZoneFilter) || 'all');
+
+  function updateUrl(patch: Record<string, string>) {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      for (const [k, v] of Object.entries(patch)) {
+        if (v && v !== 'all') next.set(k, v); else next.delete(k);
+      }
+      return next;
+    }, { replace: true });
+  }
+
+  function setSearchAndUrl(v: string) { setSearch(v); updateUrl({ q: v }); }
+  function setStatusAndUrl(v: PanelStatus | 'all') { setStatusFilter(v); updateUrl({ status: v }); }
+  function setZoneAndUrl(v: ZoneFilter) { setZoneFilter(v); updateUrl({ zones: v }); }
 
   useEffect(() => {
     let mounted = true;
@@ -43,13 +61,10 @@ export default function BuildingPanelsPage() {
       try {
         const [b, p] = await Promise.all([fetchBuildingById(id), fetchPanelsByBuilding(id)]);
         if (!mounted) return;
-        setBuilding(b);
-        setPanels(p);
+        setBuilding(b); setPanels(p);
       } catch (err) {
         if (mounted) setError(err instanceof Error ? err.message : 'Failed to load panels');
-      } finally {
-        if (mounted) setLoading(false);
-      }
+      } finally { if (mounted) setLoading(false); }
     })();
     return () => { mounted = false; };
   }, [id]);
@@ -68,7 +83,7 @@ export default function BuildingPanelsPage() {
 
   const hasFilters = search || statusFilter !== 'all' || zoneFilter !== 'all';
 
-  if (loading) return <div className="py-20 text-center text-muted-foreground">Loading…</div>;
+  if (loading) return <LoadingScreen />;
   if (error) return <div className="rounded-md border border-crit-border bg-crit-bg px-4 py-3 text-sm text-crit-text">{error}</div>;
 
   return (
@@ -84,56 +99,38 @@ export default function BuildingPanelsPage() {
         </div>
       </Card>
 
-      {/* Header + filters */}
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <div>
             <h3 className="text-lg font-semibold">Panels</h3>
-            <p className="text-sm text-muted-foreground">
-              {filtered.length} of {panels.length} panel{panels.length !== 1 ? 's' : ''}
-            </p>
+            <p className="text-sm text-muted-foreground">{filtered.length} of {panels.length} panel{panels.length !== 1 ? 's' : ''}</p>
           </div>
         </div>
-
         <div className="flex flex-wrap items-center gap-2">
-          {/* Search */}
           <div className="relative">
             <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
             <input
-              type="text"
-              placeholder="Search by name or code…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              type="text" placeholder="Search by name or code…" value={search}
+              onChange={(e) => setSearchAndUrl(e.target.value)}
               className="h-8 w-52 rounded-md border border-border bg-background pl-8 pr-3 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
             />
             {search && (
-              <button onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+              <button onClick={() => setSearchAndUrl('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
                 <X className="h-3.5 w-3.5" />
               </button>
             )}
           </div>
-
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as PanelStatus | 'all')}
-            className="h-8 rounded-md border border-border bg-background px-2 text-xs text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-          >
+          <select value={statusFilter} onChange={(e) => setStatusAndUrl(e.target.value as PanelStatus | 'all')}
+            className="h-8 rounded-md border border-border bg-background px-2 text-xs text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring">
             {STATUS_OPTS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
-
-          <select
-            value={zoneFilter}
-            onChange={(e) => setZoneFilter(e.target.value as ZoneFilter)}
-            className="h-8 rounded-md border border-border bg-background px-2 text-xs text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-          >
+          <select value={zoneFilter} onChange={(e) => setZoneAndUrl(e.target.value as ZoneFilter)}
+            className="h-8 rounded-md border border-border bg-background px-2 text-xs text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring">
             {ZONE_OPTS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
-
           {hasFilters && (
-            <button
-              onClick={() => { setSearch(''); setStatusFilter('all'); setZoneFilter('all'); }}
-              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
-            >
+            <button onClick={() => { setSearchAndUrl(''); setStatusAndUrl('all'); setZoneAndUrl('all'); }}
+              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
               <X className="h-3 w-3" /> Clear
             </button>
           )}
@@ -148,19 +145,29 @@ export default function BuildingPanelsPage() {
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {filtered.map((p) => {
             const meta = PANEL_STATUS_META[p.status] ?? PANEL_STATUS_META.NORMAL;
-            const accent = p.fire > 0 ? 'border-l-crit-strong' : p.fault > 0 ? 'border-l-warn-strong' : 'border-l-ok-strong';
+            const isOnline = p.status !== 'OFFLINE';
+            const accent = p.fire > 0 ? 'border-l-red-500' : p.fault > 0 ? 'border-l-amber-500' : 'border-l-green-500';
             return (
-              <Card key={p.id} onClick={() => navigate(`/panels/${p.id}`)} className={cn('flex cursor-pointer flex-col gap-2 border-l-4 p-4 transition-transform hover:-translate-y-0.5 hover:shadow-md', accent)}>
+              <Card key={p.id} onClick={() => navigate(`/panels/${p.id}`)}
+                className={cn('flex cursor-pointer flex-col gap-2 border-l-4 p-4 transition-transform hover:-translate-y-0.5 hover:shadow-md', accent)}>
                 <div className="flex items-center justify-between">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-md bg-secondary text-primary"><Cpu className="h-5 w-5" /></div>
-                  <Badge variant={meta.variant}>{meta.label}</Badge>
+                  <div className="flex h-9 w-9 items-center justify-center rounded-md bg-secondary text-primary">
+                    <Cpu className="h-5 w-5" />
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className={cn('flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium', isOnline ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-500')}>
+                      <span className={cn('h-1.5 w-1.5 rounded-full', isOnline ? 'bg-green-500' : 'bg-gray-400')} />
+                      {isOnline ? 'Online' : 'Offline'}
+                    </span>
+                    <Badge variant={meta.variant}>{meta.label}</Badge>
+                  </div>
                 </div>
                 <div className="font-semibold">{p.panel_name || p.panel_code}</div>
                 <div className="font-mono text-xs text-muted-foreground">{p.panel_code}</div>
                 <div className="mt-2 flex gap-4 border-t border-border pt-3 text-xs text-muted-foreground">
                   <span><strong className="text-foreground">{p.zoneCount}</strong> zones</span>
-                  <span className={p.fire > 0 ? 'text-crit-text' : ''}><strong className={p.fire > 0 ? 'text-crit-strong' : 'text-foreground'}>{p.fire}</strong> fire</span>
-                  <span className={p.fault > 0 ? 'text-warn-text' : ''}><strong className={p.fault > 0 ? 'text-warn-strong' : 'text-foreground'}>{p.fault}</strong> fault</span>
+                  <span className={p.fire > 0 ? 'text-red-700' : ''}><strong className={p.fire > 0 ? 'text-red-600' : 'text-foreground'}>{p.fire}</strong> fire</span>
+                  <span className={p.fault > 0 ? 'text-amber-700' : ''}><strong className={p.fault > 0 ? 'text-amber-600' : 'text-foreground'}>{p.fault}</strong> fault</span>
                 </div>
               </Card>
             );

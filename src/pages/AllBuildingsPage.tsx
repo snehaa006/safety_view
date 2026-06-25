@@ -7,6 +7,7 @@ import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import type { Building } from '@/types';
+import { LoadingScreen } from '@/components/ui/spinner';
 
 type StatusFilter = 'all' | 'fire' | 'fault' | 'healthy';
 
@@ -79,7 +80,7 @@ export default function AllBuildingsPage() {
     setGroupFilter('');
   }
 
-  if (loading) return <div className="py-20 text-center text-muted-foreground">Loading buildings…</div>;
+  if (loading) return <LoadingScreen />;
   if (error) return <div className="rounded-md border border-crit-border bg-crit-bg px-4 py-3 text-sm text-crit-text">{error}</div>;
 
   return (

@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { formatDate, formatDateTime } from '@/utils/format';
 import type { ManagedUser, UserAlertPreference } from '@/types';
+import { LoadingScreen } from '@/components/ui/spinner';
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -45,7 +46,7 @@ export default function ProfilePage() {
     })();
   }, [user]);
 
-  if (loading) return <div className="py-20 text-center text-muted-foreground">Loading…</div>;
+  if (loading) return <LoadingScreen />;
   if (!me) return <div className="py-20 text-center text-muted-foreground">Profile unavailable.</div>;
 
   return (

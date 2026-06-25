@@ -1,5 +1,5 @@
 import { useLocation, matchPath, useNavigate } from 'react-router-dom';
-import { Clock, LogOut } from 'lucide-react';
+import { LogOut } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { Button } from '@/components/ui/button';
 
@@ -59,10 +59,6 @@ export default function Topbar() {
     <header className="flex items-center justify-between border-b border-border bg-card px-6 py-4">
       <h2 className="text-xl font-bold tracking-tight">{titleForPath(pathname)}</h2>
       <div className="flex items-center gap-4">
-        <div className="flex items-center gap-1.5 rounded-full border border-ok-border bg-ok-bg px-3 py-1 text-xs font-medium text-ok-text">
-          <Clock className="h-3.5 w-3.5" />
-          <span>Live</span>
-        </div>
         <button
           onClick={() => navigate('/profile')}
           className="flex items-center gap-3 rounded-md px-2 py-1 transition-colors hover:bg-secondary"

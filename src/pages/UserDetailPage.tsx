@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { formatDate, formatDateTime } from '@/utils/format';
 import type { ManagedUser } from '@/types';
+import { LoadingScreen } from '@/components/ui/spinner';
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -37,7 +38,7 @@ export default function UserDetailPage() {
     })();
   }, [id, currentUser]);
 
-  if (loading) return <div className="py-20 text-center text-muted-foreground">Loading…</div>;
+  if (loading) return <LoadingScreen />;
   if (!u) return <div className="py-20 text-center text-muted-foreground">User not found.</div>;
 
   const buildings = u.building_ids.map((bid) => buildingNames[bid] || `#${bid}`).join(', ');

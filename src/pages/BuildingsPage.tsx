@@ -6,6 +6,7 @@ import { useAuth } from '@/context/AuthContext';
 import { Card } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import type { Building } from '@/types';
+import { LoadingScreen } from '@/components/ui/spinner';
 
 interface MetricCardProps {
   label: string;
@@ -64,7 +65,7 @@ export default function BuildingsPage() {
 
   const scope = useMemo(() => summariseBuildings(buildings), [buildings]);
 
-  if (loading) return <div className="py-20 text-center text-muted-foreground">Loading…</div>;
+  if (loading) return <LoadingScreen />;
   if (error) return <div className="rounded-md border border-crit-border bg-crit-bg px-4 py-3 text-sm text-crit-text">{error}</div>;
 
   return (

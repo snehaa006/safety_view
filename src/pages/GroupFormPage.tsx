@@ -6,6 +6,7 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { LoadingScreen } from '@/components/ui/spinner';
 
 export default function GroupFormPage() {
   const { id } = useParams();
@@ -42,7 +43,7 @@ export default function GroupFormPage() {
     }
   }
 
-  if (loading) return <div className="py-20 text-center text-muted-foreground">Loading…</div>;
+  if (loading) return <LoadingScreen />;
 
   return (
     <section className="mx-auto max-w-xl space-y-4">

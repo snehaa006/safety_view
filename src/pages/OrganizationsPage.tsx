@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { formatDate } from '@/utils/format';
 import type { Organization } from '@/types';
+import { LoadingScreen } from '@/components/ui/spinner';
 
 export default function OrganizationsPage() {
   const navigate = useNavigate();
@@ -79,7 +80,7 @@ export default function OrganizationsPage() {
       </div>
 
       <Card>
-        {loading ? <div className="p-6 text-center text-sm text-muted-foreground">Loading…</div> : (
+        {loading ? <LoadingScreen /> : (
           <Table>
             <TableHeader>
               <TableRow>

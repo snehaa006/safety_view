@@ -16,6 +16,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import type { Building, ManagedUser, Organization, Role } from '@/types';
+import { LoadingScreen } from '@/components/ui/spinner';
 
 interface FormState {
   username: string;
@@ -131,7 +132,7 @@ export default function UserFormPage() {
     finally { setSubmitting(false); }
   }
 
-  if (loading) return <div className="py-20 text-center text-muted-foreground">Loading…</div>;
+  if (loading) return <LoadingScreen />;
 
   return (
     <section className="mx-auto max-w-3xl space-y-4">
