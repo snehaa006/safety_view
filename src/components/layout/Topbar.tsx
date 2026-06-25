@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { useLocation, matchPath, useNavigate } from 'react-router-dom';
 import { LogOut } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
@@ -47,17 +48,30 @@ function titleForPath(pathname: string): string {
     ['/settings', 'Settings'],
   ];
   for (const [pattern, title] of map) if (matchPath(pattern, pathname)) return title;
-  return 'SafetyView';
+  return '';
 }
 
 export default function Topbar() {
   const { user, logout } = useAuth();
   const { pathname } = useLocation();
   const navigate = useNavigate();
+  const [appName, setAppName] = useState(() => localStorage.getItem('sv_app_name') || 'SafetyView');
+
+  useEffect(() => {
+    function onUpdate() { setAppName(localStorage.getItem('sv_app_name') || 'SafetyView'); }
+    window.addEventListener('sv_branding_update', onUpdate);
+    return () => window.removeEventListener('sv_branding_update', onUpdate);
+  }, []);
+
+  const pageTitle = titleForPath(pathname);
+
+  useEffect(() => {
+    document.title = pageTitle ? `${pageTitle} — ${appName}` : appName;
+  }, [pageTitle, appName]);
 
   return (
     <header className="flex items-center justify-between border-b border-border bg-card px-6 py-4">
-      <h2 className="text-xl font-bold tracking-tight">{titleForPath(pathname)}</h2>
+      <h2 className="text-xl font-bold tracking-tight">{pageTitle || appName}</h2>
       <div className="flex items-center gap-4">
         <button
           onClick={() => navigate('/profile')}
