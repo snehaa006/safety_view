@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 import { changePassword, fetchAlertPreferences, setAlertPreferences } from '@/services/api';
 import { useAuth } from '@/context/AuthContext';
+import { isAdminUser } from '@/lib/roles';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -24,8 +25,8 @@ export default function SettingsPage() {
   const [pwOk, setPwOk] = useState('');
   const [pwBusy, setPwBusy] = useState(false);
 
-  // branding (super admin only)
-  const isSuperAdmin = user?.roles?.includes('Super Admin');
+  // branding (admin only)
+  const isSuperAdmin = isAdminUser(user);
   const [appName, setAppName] = useState(() => localStorage.getItem(APP_NAME_KEY) || '');
   const [appLogo, setAppLogo] = useState(() => localStorage.getItem(APP_LOGO_KEY) || '');
   const [brandingMsg, setBrandingMsg] = useState('');
