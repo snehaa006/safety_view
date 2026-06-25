@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { LoadingScreen } from '@/components/ui/spinner';
+import ConfirmDialog from '@/components/ui/confirm-dialog';
 
 interface FormState {
   address: string; city: string; state: string; country: string; postal_code: string;
@@ -22,6 +23,7 @@ export default function LocationFormPage() {
   const [loading, setLoading] = useState(isEdit);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [showConfirm, setShowConfirm] = useState(false);
 
   useEffect(() => {
     if (!isEdit) return;
@@ -44,7 +46,12 @@ export default function LocationFormPage() {
     );
   }
 
+  function handleSaveClick() {
+    setShowConfirm(true);
+  }
+
   async function handleSubmit() {
+    setShowConfirm(false);
     const payload = {
       address: form.address.trim() || null, city: form.city.trim() || null,
       state: form.state.trim() || null, country: form.country.trim() || null,
@@ -91,9 +98,19 @@ export default function LocationFormPage() {
         <div className="mt-6 flex items-center justify-end gap-3">
           {error && <span className="text-sm text-crit-text">{error}</span>}
           <Button variant="outline" onClick={() => navigate(isEdit ? `/locations/${id}` : '/locations')}>Cancel</Button>
-          <Button onClick={handleSubmit} disabled={submitting}>{submitting ? 'Saving…' : isEdit ? 'Save Changes' : 'Create Location'}</Button>
+          <Button onClick={handleSaveClick} disabled={submitting}>{submitting ? 'Saving…' : isEdit ? 'Save Changes' : 'Create Location'}</Button>
         </div>
       </Card>
+
+      <ConfirmDialog
+        open={showConfirm}
+        onOpenChange={setShowConfirm}
+        title={isEdit ? 'Save changes?' : 'Create location?'}
+        description={isEdit ? 'Save changes to this location?' : 'Create this new location?'}
+        confirmLabel={isEdit ? 'Save Changes' : 'Create Location'}
+        onConfirm={handleSubmit}
+        loading={submitting}
+      />
     </section>
   );
 }

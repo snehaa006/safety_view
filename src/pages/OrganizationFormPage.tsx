@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { LoadingScreen } from '@/components/ui/spinner';
+import ConfirmDialog from '@/components/ui/confirm-dialog';
 
 export default function OrganizationFormPage() {
   const { id } = useParams();
@@ -18,6 +19,7 @@ export default function OrganizationFormPage() {
   const [loading, setLoading] = useState(isEdit);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [showConfirm, setShowConfirm] = useState(false);
 
   useEffect(() => {
     if (!isEdit) return;
@@ -27,8 +29,13 @@ export default function OrganizationFormPage() {
     });
   }, [id, isEdit]);
 
+  function handleSaveClick() {
+    if (!name.trim()) { setError('Organization name is required.'); return; }
+    setShowConfirm(true);
+  }
+
   async function handleSubmit() {
-    if (!name.trim()) return setError('Organization name is required.');
+    setShowConfirm(false);
     try {
       setSubmitting(true);
       if (isEdit) {
@@ -71,9 +78,19 @@ export default function OrganizationFormPage() {
         <div className="mt-6 flex items-center justify-end gap-3">
           {error && <span className="text-sm text-crit-text">{error}</span>}
           <Button variant="outline" onClick={() => navigate(isEdit ? `/organizations/${id}` : '/organizations')}>Cancel</Button>
-          <Button onClick={handleSubmit} disabled={submitting}>{submitting ? 'Saving…' : isEdit ? 'Save Changes' : 'Create Organization'}</Button>
+          <Button onClick={handleSaveClick} disabled={submitting}>{submitting ? 'Saving…' : isEdit ? 'Save Changes' : 'Create Organization'}</Button>
         </div>
       </Card>
+
+      <ConfirmDialog
+        open={showConfirm}
+        onOpenChange={setShowConfirm}
+        title={isEdit ? 'Save changes?' : 'Create organization?'}
+        description={isEdit ? `Save changes to "${name.trim()}"?` : `Create a new organization named "${name.trim()}"?`}
+        confirmLabel={isEdit ? 'Save Changes' : 'Create Organization'}
+        onConfirm={handleSubmit}
+        loading={submitting}
+      />
     </section>
   );
 }

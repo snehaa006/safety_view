@@ -10,6 +10,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import type { Building, PanelStatus } from '@/types';
 import { LoadingScreen } from '@/components/ui/spinner';
+import ConfirmDialog from '@/components/ui/confirm-dialog';
 
 const STATUSES: PanelStatus[] = ['NORMAL', 'ALARM', 'FAULT', 'OFFLINE'];
 
@@ -26,6 +27,7 @@ export default function PanelAdminFormPage() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [showConfirm, setShowConfirm] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -42,7 +44,14 @@ export default function PanelAdminFormPage() {
     })();
   }, [id, isEdit, user]);
 
+  function handleSaveClick() {
+    if (!form.panel_code.trim()) { setError('Panel code is required.'); return; }
+    if (!form.building_id) { setError('Building is required.'); return; }
+    setShowConfirm(true);
+  }
+
   async function handleSubmit() {
+    setShowConfirm(false);
     if (!form.panel_code.trim()) return setError('Panel code is required.');
     if (!form.building_id) return setError('Building is required.');
     const payload = { panel_name: form.panel_name.trim() || null, status: form.status, notes: form.notes.trim() || null };
@@ -105,9 +114,19 @@ export default function PanelAdminFormPage() {
         <div className="mt-6 flex items-center justify-end gap-3">
           {error && <span className="text-sm text-crit-text">{error}</span>}
           <Button variant="outline" onClick={() => navigate(isEdit ? `/panel-management/${id}` : '/panel-management')}>Cancel</Button>
-          <Button onClick={handleSubmit} disabled={submitting}>{submitting ? 'Saving…' : isEdit ? 'Save Changes' : 'Create Panel'}</Button>
+          <Button onClick={handleSaveClick} disabled={submitting}>{submitting ? 'Saving…' : isEdit ? 'Save Changes' : 'Create Panel'}</Button>
         </div>
       </Card>
+
+      <ConfirmDialog
+        open={showConfirm}
+        onOpenChange={setShowConfirm}
+        title={isEdit ? 'Save changes?' : 'Create panel?'}
+        description={isEdit ? `Save changes to panel "${form.panel_code}"?` : `Create a new panel with code "${form.panel_code.trim()}"?`}
+        confirmLabel={isEdit ? 'Save Changes' : 'Create Panel'}
+        onConfirm={handleSubmit}
+        loading={submitting}
+      />
     </section>
   );
 }

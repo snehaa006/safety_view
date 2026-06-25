@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { LoadingScreen } from '@/components/ui/spinner';
+import ConfirmDialog from '@/components/ui/confirm-dialog';
 
 export default function GroupFormPage() {
   const { id } = useParams();
@@ -17,6 +18,7 @@ export default function GroupFormPage() {
   const [loading, setLoading] = useState(isEdit);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [showConfirm, setShowConfirm] = useState(false);
 
   useEffect(() => {
     if (!isEdit) return;
@@ -26,8 +28,13 @@ export default function GroupFormPage() {
     });
   }, [id, isEdit]);
 
+  function handleSaveClick() {
+    if (!name.trim()) { setError('Group name is required.'); return; }
+    setShowConfirm(true);
+  }
+
   async function handleSubmit() {
-    if (!name.trim()) return setError('Group name is required.');
+    setShowConfirm(false);
     try {
       setSubmitting(true);
       if (isEdit) {
@@ -66,9 +73,19 @@ export default function GroupFormPage() {
         <div className="mt-6 flex items-center justify-end gap-3">
           {error && <span className="text-sm text-crit-text">{error}</span>}
           <Button variant="outline" onClick={() => navigate(isEdit ? `/groups/${id}` : '/groups')}>Cancel</Button>
-          <Button onClick={handleSubmit} disabled={submitting}>{submitting ? 'Saving…' : isEdit ? 'Save Changes' : 'Create Group'}</Button>
+          <Button onClick={handleSaveClick} disabled={submitting}>{submitting ? 'Saving…' : isEdit ? 'Save Changes' : 'Create Group'}</Button>
         </div>
       </Card>
+
+      <ConfirmDialog
+        open={showConfirm}
+        onOpenChange={setShowConfirm}
+        title={isEdit ? 'Save changes?' : 'Create group?'}
+        description={isEdit ? `Save changes to "${name.trim()}"?` : `Create a new group named "${name.trim()}"?`}
+        confirmLabel={isEdit ? 'Save Changes' : 'Create Group'}
+        onConfirm={handleSubmit}
+        loading={submitting}
+      />
     </section>
   );
 }

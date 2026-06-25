@@ -12,6 +12,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import type { Group } from '@/types';
 import { LoadingScreen } from '@/components/ui/spinner';
+import ConfirmDialog from '@/components/ui/confirm-dialog';
 
 interface FormState {
   building_name: string; group_id: string;
@@ -29,6 +30,7 @@ export default function BuildingFormPage() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [showConfirm, setShowConfirm] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -59,7 +61,14 @@ export default function BuildingFormPage() {
     );
   }
 
+  function handleSaveClick() {
+    if (!form.building_name.trim()) { setError('Building name is required.'); return; }
+    if (!form.group_id) { setError('Group is required.'); return; }
+    setShowConfirm(true);
+  }
+
   async function handleSubmit() {
+    setShowConfirm(false);
     if (!form.building_name.trim()) return setError('Building name is required.');
     if (!form.group_id) return setError('Group is required.');
     const locFields = {
@@ -115,9 +124,19 @@ export default function BuildingFormPage() {
         <div className="mt-6 flex items-center justify-end gap-3">
           {error && <span className="text-sm text-crit-text">{error}</span>}
           <Button variant="outline" onClick={() => navigate(isEdit ? `/building-management/${id}` : '/building-management')}>Cancel</Button>
-          <Button onClick={handleSubmit} disabled={submitting}>{submitting ? 'Saving…' : isEdit ? 'Save Changes' : 'Create Building'}</Button>
+          <Button onClick={handleSaveClick} disabled={submitting}>{submitting ? 'Saving…' : isEdit ? 'Save Changes' : 'Create Building'}</Button>
         </div>
       </Card>
+
+      <ConfirmDialog
+        open={showConfirm}
+        onOpenChange={setShowConfirm}
+        title={isEdit ? 'Save changes?' : 'Create building?'}
+        description={isEdit ? `Save changes to "${form.building_name.trim()}"?` : `Create a new building named "${form.building_name.trim()}"?`}
+        confirmLabel={isEdit ? 'Save Changes' : 'Create Building'}
+        onConfirm={handleSubmit}
+        loading={submitting}
+      />
     </section>
   );
 }
