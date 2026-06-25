@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from '@/context/AuthContext';
+import { AppSettingsProvider } from '@/context/AppSettingsContext';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
 import AdminRoute from '@/components/auth/AdminRoute';
 import DashboardLayout from '@/components/layout/DashboardLayout';
@@ -39,6 +40,7 @@ import ZonesByStatePage from '@/pages/ZonesByStatePage';
 
 export default function App() {
   return (
+    <AppSettingsProvider>
     <AuthProvider>
       <BrowserRouter>
         <Routes>
@@ -105,5 +107,6 @@ export default function App() {
         </Routes>
       </BrowserRouter>
     </AuthProvider>
+    </AppSettingsProvider>
   );
 }

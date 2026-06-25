@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Flame, Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
+import { useAppSettings } from '@/context/AppSettingsContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -13,8 +14,7 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const appName = localStorage.getItem('sv_app_name') || 'SafetyView';
-  const appLogo = localStorage.getItem('sv_app_logo') || '';
+  const { appName, logoData } = useAppSettings();
 
   const { login } = useAuth();
   const navigate = useNavigate();
@@ -40,8 +40,8 @@ export default function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="w-full max-w-md rounded-lg border border-border bg-card p-8 shadow-md">
         <div className="mb-6 flex items-center gap-3">
-          {appLogo ? (
-            <img src={appLogo} alt="Logo" className="h-12 w-12 rounded-md object-contain" />
+          {logoData ? (
+            <img src={logoData} alt="Logo" className="h-12 w-12 rounded-md object-contain" />
           ) : (
             <div className="flex h-12 w-12 items-center justify-center rounded-md border border-fire-border bg-fire-bg">
               <Flame className="h-6 w-6 text-fire-strong" />

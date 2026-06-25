@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 import { changePassword, fetchAlertPreferences, setAlertPreferences } from '@/services/api';
 import { useAuth } from '@/context/AuthContext';
+import { useAppSettings } from '@/context/AppSettingsContext';
 import { isAdminUser } from '@/lib/roles';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -11,11 +12,9 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { PasswordInput } from '@/components/ui/password-input';
 import type { UserAlertPreference } from '@/types';
 
-const APP_NAME_KEY = 'sv_app_name';
-const APP_LOGO_KEY = 'sv_app_logo';
-
 export default function SettingsPage() {
   const { user } = useAuth();
+  const { appName: storedName, logoData: storedLogo, save } = useAppSettings();
 
   // password
   const [current, setCurrent] = useState('');
@@ -27,18 +26,25 @@ export default function SettingsPage() {
 
   // branding (admin only)
   const isSuperAdmin = isAdminUser(user);
-  const [appName, setAppName] = useState(() => localStorage.getItem(APP_NAME_KEY) || '');
-  const [appLogo, setAppLogo] = useState(() => localStorage.getItem(APP_LOGO_KEY) || '');
+  const [appName, setAppName] = useState(storedName);
+  const [appLogo, setAppLogo] = useState(storedLogo);
   const [brandingMsg, setBrandingMsg] = useState('');
+  const [brandingBusy, setBrandingBusy] = useState(false);
 
-  function saveBranding() {
-    if (appName.trim()) localStorage.setItem(APP_NAME_KEY, appName.trim());
-    else localStorage.removeItem(APP_NAME_KEY);
-    if (appLogo.trim()) localStorage.setItem(APP_LOGO_KEY, appLogo.trim());
-    else localStorage.removeItem(APP_LOGO_KEY);
-    window.dispatchEvent(new Event('sv_branding_update'));
-    setBrandingMsg('Branding saved.');
-    setTimeout(() => setBrandingMsg(''), 3000);
+  useEffect(() => { setAppName(storedName); }, [storedName]);
+  useEffect(() => { setAppLogo(storedLogo); }, [storedLogo]);
+
+  async function saveBranding() {
+    try {
+      setBrandingBusy(true);
+      await save({ app_name: appName.trim() || null, logo_data: appLogo || null });
+      setBrandingMsg('Branding saved.');
+      setTimeout(() => setBrandingMsg(''), 3000);
+    } catch (err) {
+      setBrandingMsg(err instanceof Error ? err.message : 'Failed to save branding.');
+    } finally {
+      setBrandingBusy(false);
+    }
   }
 
   // alert prefs
@@ -95,7 +101,7 @@ export default function SettingsPage() {
       {isSuperAdmin && (
         <Card className="p-6">
           <h4 className="mb-4 font-semibold">App Branding</h4>
-          <p className="mb-4 text-xs text-muted-foreground">Customize the app name and logo shown in the sidebar. Changes are stored locally in this browser.</p>
+          <p className="mb-4 text-xs text-muted-foreground">Customize the app name and logo. Changes are saved to the database and visible to all users.</p>
           {brandingMsg && <div className="mb-4 rounded-md border border-ok-border bg-ok-bg px-3 py-2 text-sm text-ok-text">{brandingMsg}</div>}
           <div className="flex flex-col gap-4">
             <div className="flex flex-col gap-1.5">
@@ -126,7 +132,7 @@ export default function SettingsPage() {
                 )}
               </div>
             </div>
-            <div className="flex justify-end"><Button onClick={saveBranding}>Save Branding</Button></div>
+            <div className="flex justify-end"><Button onClick={saveBranding} disabled={brandingBusy}>{brandingBusy ? 'Saving…' : 'Save Branding'}</Button></div>
           </div>
         </Card>
       )}
