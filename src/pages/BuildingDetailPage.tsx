@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ChevronLeft, Pencil, Trash2 } from 'lucide-react';
+import { ChevronLeft, ExternalLink, Pencil, Trash2 } from 'lucide-react';
 import { fetchBuildingById, deleteBuilding, locationLabel } from '@/services/api';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -52,6 +52,9 @@ export default function BuildingDetailPage() {
           <ChevronLeft className="h-4 w-4" /> Back to Building Management
         </button>
         <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={() => navigate(`/buildings/${building.id}`)}>
+            <ExternalLink className="h-4 w-4" /> View Panels
+          </Button>
           <Button variant="outline" size="sm" onClick={() => navigate(`/building-management/${building.id}/edit`)}>
             <Pencil className="h-4 w-4" /> Edit
           </Button>
