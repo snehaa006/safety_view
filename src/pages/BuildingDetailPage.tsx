@@ -9,6 +9,7 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
 import type { Building } from '@/types';
+import { LoadingScreen } from '@/components/ui/spinner';
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -41,7 +42,7 @@ export default function BuildingDetailPage() {
     }
   }
 
-  if (loading) return <div className="py-20 text-center text-muted-foreground">Loading…</div>;
+  if (loading) return <LoadingScreen />;
   if (!building) return <div className="py-20 text-center text-muted-foreground">Building not found.</div>;
 
   return (

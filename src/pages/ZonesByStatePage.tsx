@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { ZONE_STATE_META } from '@/utils/format';
 import { cn } from '@/lib/utils';
 import type { ZoneWithContext } from '@/services/api';
+import { LoadingScreen } from '@/components/ui/spinner';
 
 type State = 'FIRE' | 'FAULT';
 
@@ -116,7 +117,7 @@ export default function ZonesByStatePage() {
     setZoneTypeFilter('');
   }
 
-  if (loading) return <div className="py-20 text-center text-muted-foreground">Loading zones…</div>;
+  if (loading) return <LoadingScreen />;
   if (error) return <div className="rounded-md border border-crit-border bg-crit-bg px-4 py-3 text-sm text-crit-text">{error}</div>;
 
   return (

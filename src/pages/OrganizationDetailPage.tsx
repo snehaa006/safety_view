@@ -10,6 +10,7 @@ import {
 } from '@/components/ui/dialog';
 import { formatDate } from '@/utils/format';
 import type { Organization } from '@/types';
+import { LoadingScreen } from '@/components/ui/spinner';
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -42,7 +43,7 @@ export default function OrganizationDetailPage() {
     }
   }
 
-  if (loading) return <div className="py-20 text-center text-muted-foreground">Loading…</div>;
+  if (loading) return <LoadingScreen />;
   if (!org) return <div className="py-20 text-center text-muted-foreground">Organization not found.</div>;
 
   return (

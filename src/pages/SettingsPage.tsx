@@ -10,6 +10,9 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { PasswordInput } from '@/components/ui/password-input';
 import type { UserAlertPreference } from '@/types';
 
+const APP_NAME_KEY = 'sv_app_name';
+const APP_LOGO_KEY = 'sv_app_logo';
+
 export default function SettingsPage() {
   const { user } = useAuth();
 
@@ -20,6 +23,21 @@ export default function SettingsPage() {
   const [pwErr, setPwErr] = useState('');
   const [pwOk, setPwOk] = useState('');
   const [pwBusy, setPwBusy] = useState(false);
+
+  // branding (super admin only)
+  const isSuperAdmin = user?.roles?.includes('Super Admin');
+  const [appName, setAppName] = useState(() => localStorage.getItem(APP_NAME_KEY) || '');
+  const [appLogo, setAppLogo] = useState(() => localStorage.getItem(APP_LOGO_KEY) || '');
+  const [brandingMsg, setBrandingMsg] = useState('');
+
+  function saveBranding() {
+    if (appName.trim()) localStorage.setItem(APP_NAME_KEY, appName.trim());
+    else localStorage.removeItem(APP_NAME_KEY);
+    if (appLogo.trim()) localStorage.setItem(APP_LOGO_KEY, appLogo.trim());
+    else localStorage.removeItem(APP_LOGO_KEY);
+    setBrandingMsg('Branding saved. Reload to see changes in the sidebar.');
+    setTimeout(() => setBrandingMsg(''), 4000);
+  }
 
   // alert prefs
   const [prefs, setPrefs] = useState<UserAlertPreference[]>([]);
@@ -71,6 +89,26 @@ export default function SettingsPage() {
         <h3 className="text-lg font-bold">Settings</h3>
         <p className="text-sm text-muted-foreground">Manage your account</p>
       </div>
+
+      {isSuperAdmin && (
+        <Card className="p-6">
+          <h4 className="mb-4 font-semibold">App Branding</h4>
+          <p className="mb-4 text-xs text-muted-foreground">Customize the app name and logo shown in the sidebar. Changes are stored locally in this browser.</p>
+          {brandingMsg && <div className="mb-4 rounded-md border border-ok-border bg-ok-bg px-3 py-2 text-sm text-ok-text">{brandingMsg}</div>}
+          <div className="flex flex-col gap-4">
+            <div className="flex flex-col gap-1.5">
+              <Label>App Name</Label>
+              <Input value={appName} onChange={(e) => setAppName(e.target.value)} placeholder="SafetyView" />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label>Logo URL</Label>
+              <Input value={appLogo} onChange={(e) => setAppLogo(e.target.value)} placeholder="https://…/logo.png" />
+              {appLogo && <img src={appLogo} alt="Logo preview" className="h-10 w-auto rounded border border-border object-contain" onError={(e) => (e.currentTarget.style.display = 'none')} />}
+            </div>
+            <div className="flex justify-end"><Button onClick={saveBranding}>Save Branding</Button></div>
+          </div>
+        </Card>
+      )}
 
       <Card className="p-6">
         <h4 className="mb-4 font-semibold">Change Password</h4>

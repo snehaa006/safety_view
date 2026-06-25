@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import type { Group } from '@/types';
+import { LoadingScreen } from '@/components/ui/spinner';
 
 interface FormState {
   building_name: string; group_id: string;
@@ -83,7 +84,7 @@ export default function BuildingFormPage() {
     }
   }
 
-  if (loading) return <div className="py-20 text-center text-muted-foreground">Loading…</div>;
+  if (loading) return <LoadingScreen />;
 
   return (
     <section className="mx-auto max-w-xl space-y-4">

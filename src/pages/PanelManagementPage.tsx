@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Plus, Search, X } from 'lucide-react';
+import { LoadingScreen } from '@/components/ui/spinner';
 import { fetchAllPanels } from '@/services/api';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -11,12 +12,23 @@ import type { Panel, PanelStatus } from '@/types';
 
 export default function PanelManagementPage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [panels, setPanels] = useState<Panel[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<PanelStatus | 'all'>('all');
-  const [buildingFilter, setBuildingFilter] = useState('');
+  const [search, setSearch] = useState(searchParams.get('q') || '');
+  const [statusFilter, setStatusFilter] = useState<PanelStatus | 'all'>((searchParams.get('status') as PanelStatus | 'all') || 'all');
+  const [buildingFilter, setBuildingFilter] = useState(searchParams.get('building') || '');
+
+  function updateUrl(patch: Record<string, string>) {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      for (const [k, v] of Object.entries(patch)) {
+        if (v && v !== 'all') next.set(k, v); else next.delete(k);
+      }
+      return next;
+    }, { replace: true });
+  }
 
   useEffect(() => {
     fetchAllPanels()
@@ -64,18 +76,18 @@ export default function PanelManagementPage() {
             type="text"
             placeholder="Search code, name, building…"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => { setSearch(e.target.value); updateUrl({ q: e.target.value }); }}
             className="h-8 w-60 rounded-md border border-border bg-background pl-8 pr-3 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
           />
           {search && (
-            <button onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+            <button onClick={() => { setSearch(''); updateUrl({ q: '' }); }} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
               <X className="h-3.5 w-3.5" />
             </button>
           )}
         </div>
         <select
           value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value as PanelStatus | 'all')}
+          onChange={(e) => { setStatusFilter(e.target.value as PanelStatus | 'all'); updateUrl({ status: e.target.value }); }}
           className="h-8 rounded-md border border-border bg-background px-2 text-xs text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
         >
           <option value="all">All statuses</option>
@@ -87,7 +99,7 @@ export default function PanelManagementPage() {
         {buildings.length > 1 && (
           <select
             value={buildingFilter}
-            onChange={(e) => setBuildingFilter(e.target.value)}
+            onChange={(e) => { setBuildingFilter(e.target.value); updateUrl({ building: e.target.value }); }}
             className="h-8 rounded-md border border-border bg-background px-2 text-xs text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
           >
             <option value="">All buildings</option>
@@ -95,14 +107,14 @@ export default function PanelManagementPage() {
           </select>
         )}
         {hasFilters && (
-          <button onClick={() => { setSearch(''); setStatusFilter('all'); setBuildingFilter(''); }} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
+          <button onClick={() => { setSearch(''); setStatusFilter('all'); setBuildingFilter(''); updateUrl({ q: '', status: '', building: '' }); }} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
             <X className="h-3 w-3" /> Clear
           </button>
         )}
       </div>
 
       <Card>
-        {loading ? <div className="p-6 text-center text-sm text-muted-foreground">Loading…</div> : (
+        {loading ? <LoadingScreen /> : (
           <Table>
             <TableHeader>
               <TableRow>

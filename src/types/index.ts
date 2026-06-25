@@ -95,6 +95,7 @@ export interface Location {
   postal_code: string | null;
   latitude: number | null;
   longitude: number | null;
+  building_name?: string | null;
 }
 
 export interface Building {
@@ -164,6 +165,9 @@ export interface Alert {
   building_name?: string | null;
   zone_id: number;
   zone_name?: string | null;
+  panel_id?: number | null;
+  panel_name?: string | null;
+  location?: string | null;
   type: string;
   severity: string;
   created_at: string;

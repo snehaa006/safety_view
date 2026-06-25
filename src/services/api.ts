@@ -166,13 +166,40 @@ export async function changePassword(userId: number, oldPassword: string, newPas
   void logAudit('UPDATE', { entity_type: 'users', entity_id: userId, description: 'Password changed' });
 }
 
+function parseUserAgent(ua: string): { device_type: string; os_name: string | null } {
+  const device_type = /Mobile|Android|iPhone|iPad|iPod/i.test(ua) ? 'MOBILE' : 'DESKTOP';
+  let os_name: string | null = null;
+  if (/Windows NT/i.test(ua)) os_name = 'Windows';
+  else if (/Mac OS X/i.test(ua)) os_name = 'macOS';
+  else if (/Android/i.test(ua)) os_name = 'Android';
+  else if (/iPhone|iPad|iPod/i.test(ua)) os_name = 'iOS';
+  else if (/Linux/i.test(ua)) os_name = 'Linux';
+  else if (/CrOS/i.test(ua)) os_name = 'ChromeOS';
+  return { device_type, os_name };
+}
+
+async function getClientIp(): Promise<string | null> {
+  try {
+    const res = await fetch('https://api.ipify.org?format=json', { signal: AbortSignal.timeout(3000) });
+    if (!res.ok) return null;
+    const json = await res.json() as { ip?: string };
+    return json.ip ?? null;
+  } catch { return null; }
+}
+
 async function recordLoginLog(userId: number): Promise<void> {
   try {
+    const ua = typeof navigator !== 'undefined' ? navigator.userAgent : '';
+    const { device_type, os_name } = parseUserAgent(ua);
+    const ip_address = await getClientIp();
     await supabase.from('login_logs').insert({
       user_id: userId,
       was_successful: true,
-      browser: typeof navigator !== 'undefined' ? navigator.userAgent.slice(0, 120) : null,
-      user_agent: typeof navigator !== 'undefined' ? navigator.userAgent : null,
+      device_type,
+      os_name,
+      browser: ua.slice(0, 200) || null,
+      user_agent: ua || null,
+      ip_address,
     });
   } catch {
     /* login_logs may be RLS-restricted; ignore */
@@ -313,7 +340,17 @@ export async function fetchLocations(): Promise<Location[]> {
     .select('id, address, city, state, country, postal_code, latitude, longitude')
     .order('id');
   if (error) throw new Error(error.message);
-  return (data ?? []) as Location[];
+  const locs = (data ?? []) as Location[];
+  // Attach building names
+  const { data: bdata } = await supabase.from('buildings').select('location_id, building_name');
+  if (bdata) {
+    const bmap = new Map<number, string>();
+    for (const b of bdata as { location_id: number; building_name: string }[]) {
+      if (!bmap.has(b.location_id)) bmap.set(b.location_id, b.building_name);
+    }
+    for (const l of locs) (l as any).building_name = bmap.get(l.id) ?? null;
+  }
+  return locs;
 }
 
 type LocationInput = Omit<Location, 'id'>;
@@ -742,11 +779,13 @@ export async function fetchActionLogs(panelId: number, limit = 30): Promise<impo
 // Alerts
 // ---------------------------------------------------------------------------
 
-export async function fetchAlerts(user: AuthUser | null, limit = 100): Promise<Alert[]> {
+export async function fetchAlerts(user: AuthUser | null, limit = 200): Promise<Alert[]> {
   const ids = await visibleBuildingIds(user);
   let q = supabase
     .from('alerts')
-    .select('id, zone_event_id, building_id, zone_id, type, severity, created_at, buildings ( building_name ), zones ( zone_name )')
+    .select(`id, zone_event_id, building_id, zone_id, type, severity, created_at,
+      buildings ( building_name, locations ( address, city, state ) ),
+      zones ( zone_name, panel_id, panels ( panel_name, panel_code ) )`)
     .order('created_at', { ascending: false })
     .limit(limit);
   if (ids !== null) {
@@ -755,17 +794,25 @@ export async function fetchAlerts(user: AuthUser | null, limit = 100): Promise<A
   }
   const { data, error } = await q;
   if (error) throw new Error(error.message);
-  return ((data ?? []) as any[]).map((a) => ({
-    id: a.id,
-    zone_event_id: a.zone_event_id,
-    building_id: a.building_id,
-    building_name: a.buildings?.building_name ?? null,
-    zone_id: a.zone_id,
-    zone_name: a.zones?.zone_name ?? null,
-    type: a.type,
-    severity: a.severity,
-    created_at: a.created_at,
-  }));
+  return ((data ?? []) as any[]).map((a) => {
+    const loc = a.buildings?.locations;
+    const locationStr = loc ? [loc.address, loc.city, loc.state].filter(Boolean).join(', ') : null;
+    const panel = a.zones?.panels;
+    return {
+      id: a.id,
+      zone_event_id: a.zone_event_id,
+      building_id: a.building_id,
+      building_name: a.buildings?.building_name ?? null,
+      zone_id: a.zone_id,
+      zone_name: a.zones?.zone_name ?? null,
+      panel_id: a.zones?.panel_id ?? null,
+      panel_name: panel ? (panel.panel_name || panel.panel_code) : null,
+      location: locationStr,
+      type: a.type,
+      severity: a.severity,
+      created_at: a.created_at,
+    };
+  });
 }
 
 // ---------------------------------------------------------------------------

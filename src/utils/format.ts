@@ -7,24 +7,24 @@ export interface Meta {
   dot: string; // dot color
 }
 
-export const ZONE_STATE_META: Record<ZoneState, Meta> = {
+export const ZONE_STATE_META: Record<string, Meta> = {
   HEALTHY: {
     label: 'Healthy',
-    badge: 'bg-ok-bg text-ok-text border border-ok-border',
-    tile: 'bg-ok-bg border-ok-border text-ok-text',
-    dot: 'bg-ok-strong',
+    badge: 'bg-green-100 text-green-800 border border-green-400',
+    tile: 'bg-green-100 border-green-500 text-green-900',
+    dot: 'bg-green-600',
   },
   FIRE: {
     label: 'Fire',
-    badge: 'bg-crit-bg text-crit-text border border-crit-border',
-    tile: 'bg-crit-bg border-crit-border text-crit-text',
-    dot: 'bg-crit-strong',
+    badge: 'bg-red-100 text-red-800 border border-red-500',
+    tile: 'bg-red-100 border-red-600 text-red-900',
+    dot: 'bg-red-600',
   },
   FAULT: {
     label: 'Fault',
     badge: 'bg-warn-bg text-warn-text border border-warn-border',
-    tile: 'bg-warn-bg border-warn-border text-warn-text',
-    dot: 'bg-warn-strong',
+    tile: 'bg-amber-100 border-amber-500 text-amber-900',
+    dot: 'bg-amber-500',
   },
   ISOLATION: {
     label: 'Isolation',
@@ -32,10 +32,35 @@ export const ZONE_STATE_META: Record<ZoneState, Meta> = {
     tile: 'bg-off-bg border-off-border text-off-text',
     dot: 'bg-off-text',
   },
+  // Manual action states
+  TEST: {
+    label: 'Test',
+    badge: 'bg-green-100 text-green-800 border border-green-400',
+    tile: 'bg-green-100 border-green-500 text-green-900',
+    dot: 'bg-green-600',
+  },
+  HOOTER_ON: {
+    label: 'Hooter ON',
+    badge: 'bg-red-100 text-red-800 border border-red-500',
+    tile: 'bg-red-100 border-red-600 text-red-900',
+    dot: 'bg-red-600',
+  },
+  HOOTER_OFF: {
+    label: 'Hooter OFF',
+    badge: 'bg-amber-100 text-amber-800 border border-amber-400',
+    tile: 'bg-amber-100 border-amber-500 text-amber-900',
+    dot: 'bg-amber-400',
+  },
+  RESET: {
+    label: 'Reset',
+    badge: 'bg-red-100 text-red-800 border border-red-500',
+    tile: 'bg-red-100 border-red-600 text-red-900',
+    dot: 'bg-red-600',
+  },
 };
 
 export function zoneStateMeta(state: ZoneState | string): Meta {
-  return ZONE_STATE_META[state as ZoneState] ?? ZONE_STATE_META.HEALTHY;
+  return ZONE_STATE_META[state] ?? ZONE_STATE_META.HEALTHY;
 }
 
 export const PANEL_STATUS_META: Record<PanelStatus, { label: string; variant: 'ok' | 'warn' | 'destructive' | 'off' }> = {

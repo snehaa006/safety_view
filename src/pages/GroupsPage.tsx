@@ -8,6 +8,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 import type { Group } from '@/types';
+import { LoadingScreen } from '@/components/ui/spinner';
 
 export default function GroupsPage() {
   const navigate = useNavigate();
@@ -63,7 +64,7 @@ export default function GroupsPage() {
 
       <Card>
         {loading ? (
-          <div className="p-6 text-center text-sm text-muted-foreground">Loading…</div>
+          <LoadingScreen />
         ) : (
           <Table>
             <TableHeader>

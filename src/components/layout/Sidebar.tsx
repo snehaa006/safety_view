@@ -34,14 +34,20 @@ export default function Sidebar() {
   const { user } = useAuth();
   const isAdmin = isAdminUser(user);
   const items = NAV_ITEMS.filter((i) => !i.adminOnly || isAdmin);
+  const appName = localStorage.getItem('sv_app_name') || 'SafetyView';
+  const appLogo = localStorage.getItem('sv_app_logo') || '';
 
   return (
     <aside className="sticky top-0 hidden h-screen w-56 flex-shrink-0 flex-col border-r border-border bg-card md:flex">
       <div className="flex items-center gap-2 border-b border-border px-5 py-5">
-        <div className="flex h-8 w-8 items-center justify-center rounded-md border border-water-border bg-water-bg">
-          <Droplet className="h-4 w-4 text-accent" />
-        </div>
-        <span className="text-lg font-bold tracking-tight">SafetyView</span>
+        {appLogo ? (
+          <img src={appLogo} alt="Logo" className="h-8 w-8 rounded-md object-contain" />
+        ) : (
+          <div className="flex h-8 w-8 items-center justify-center rounded-md border border-water-border bg-water-bg">
+            <Droplet className="h-4 w-4 text-accent" />
+          </div>
+        )}
+        <span className="text-lg font-bold tracking-tight">{appName}</span>
       </div>
 
       <nav className="flex flex-1 flex-col gap-0.5 overflow-y-auto p-3">
