@@ -27,6 +27,13 @@ const ACTION_LABEL: Record<ManualAction, string> = {
   RESET: 'Reset',
 };
 
+const ACTION_STYLE: Record<ManualAction, string> = {
+  TEST: 'border-green-500 bg-green-50 text-green-800 hover:bg-green-100',
+  HOOTER_ON: 'border-red-500 bg-red-50 text-red-800 hover:bg-red-100',
+  HOOTER_OFF: 'border-amber-400 bg-amber-50 text-amber-800 hover:bg-amber-100',
+  RESET: 'border-red-500 bg-red-50 text-red-800 hover:bg-red-100',
+};
+
 function ZoneCard({
   zone, editMode, draftName, onDraftChange, busy, onAction,
 }: {
@@ -62,7 +69,7 @@ function ZoneCard({
           {zone.available_actions.map((a) => (
             <Button
               key={a} size="sm" variant="outline"
-              className="h-7 bg-background/70 px-2 text-xs"
+              className={cn('h-7 px-2 text-xs font-medium', ACTION_STYLE[a])}
               disabled={busy === `${zone.id}:${a}`}
               onClick={() => onAction(zone, a)}
             >

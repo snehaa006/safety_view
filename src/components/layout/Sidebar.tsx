@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import {
   Bell, Building2, ClipboardList, Cpu, Droplet, FolderTree, KeyRound,
@@ -34,8 +35,23 @@ export default function Sidebar() {
   const { user } = useAuth();
   const isAdmin = isAdminUser(user);
   const items = NAV_ITEMS.filter((i) => !i.adminOnly || isAdmin);
-  const appName = localStorage.getItem('sv_app_name') || 'SafetyView';
-  const appLogo = localStorage.getItem('sv_app_logo') || '';
+  const [appName, setAppName] = useState(() => localStorage.getItem('sv_app_name') || 'SafetyView');
+  const [appLogo, setAppLogo] = useState(() => localStorage.getItem('sv_app_logo') || '');
+
+  useEffect(() => {
+    function onStorage(e: StorageEvent) {
+      if (e.key === 'sv_app_name') setAppName(e.newValue || 'SafetyView');
+      if (e.key === 'sv_app_logo') setAppLogo(e.newValue || '');
+    }
+    window.addEventListener('storage', onStorage);
+    // also listen for same-tab updates via a custom event
+    function onBrandingUpdate() {
+      setAppName(localStorage.getItem('sv_app_name') || 'SafetyView');
+      setAppLogo(localStorage.getItem('sv_app_logo') || '');
+    }
+    window.addEventListener('sv_branding_update', onBrandingUpdate);
+    return () => { window.removeEventListener('storage', onStorage); window.removeEventListener('sv_branding_update', onBrandingUpdate); };
+  }, []);
 
   return (
     <aside className="sticky top-0 hidden h-screen w-56 flex-shrink-0 flex-col border-r border-border bg-card md:flex">
