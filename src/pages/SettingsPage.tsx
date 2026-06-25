@@ -103,9 +103,28 @@ export default function SettingsPage() {
               <Input value={appName} onChange={(e) => setAppName(e.target.value)} placeholder="SafetyView" />
             </div>
             <div className="flex flex-col gap-1.5">
-              <Label>Logo URL</Label>
-              <Input value={appLogo} onChange={(e) => setAppLogo(e.target.value)} placeholder="https://…/logo.png" />
-              {appLogo && <img src={appLogo} alt="Logo preview" className="h-10 w-auto rounded border border-border object-contain" onError={(e) => (e.currentTarget.style.display = 'none')} />}
+              <Label>Logo</Label>
+              <div className="flex items-center gap-3">
+                {appLogo && (
+                  <img src={appLogo} alt="Logo preview" className="h-12 w-12 rounded-md border border-border object-contain" />
+                )}
+                <label className="flex cursor-pointer items-center gap-2 rounded-md border border-dashed border-border bg-secondary/40 px-4 py-2.5 text-sm text-muted-foreground hover:bg-secondary">
+                  <input
+                    type="file" accept="image/*" className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      const reader = new FileReader();
+                      reader.onload = () => setAppLogo(reader.result as string);
+                      reader.readAsDataURL(file);
+                    }}
+                  />
+                  {appLogo ? 'Change image…' : 'Upload image…'}
+                </label>
+                {appLogo && (
+                  <button onClick={() => setAppLogo('')} className="text-xs text-muted-foreground hover:text-crit-text">Remove</button>
+                )}
+              </div>
             </div>
             <div className="flex justify-end"><Button onClick={saveBranding}>Save Branding</Button></div>
           </div>
