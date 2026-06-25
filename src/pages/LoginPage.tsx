@@ -13,6 +13,9 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const appName = localStorage.getItem('sv_app_name') || 'SafetyView';
+  const appLogo = localStorage.getItem('sv_app_logo') || '';
+
   const { login } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
@@ -37,11 +40,15 @@ export default function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="w-full max-w-md rounded-lg border border-border bg-card p-8 shadow-md">
         <div className="mb-6 flex items-center gap-3">
-          <div className="flex h-12 w-12 items-center justify-center rounded-md border border-fire-border bg-fire-bg">
-            <Flame className="h-6 w-6 text-fire-strong" />
-          </div>
+          {appLogo ? (
+            <img src={appLogo} alt="Logo" className="h-12 w-12 rounded-md object-contain" />
+          ) : (
+            <div className="flex h-12 w-12 items-center justify-center rounded-md border border-fire-border bg-fire-bg">
+              <Flame className="h-6 w-6 text-fire-strong" />
+            </div>
+          )}
           <div>
-            <h1 className="text-xl font-bold tracking-tight">SafetyView</h1>
+            <h1 className="text-xl font-bold tracking-tight">{appName}</h1>
             <p className="text-sm text-muted-foreground">Fire &amp; Water Safety Dashboard</p>
           </div>
         </div>
