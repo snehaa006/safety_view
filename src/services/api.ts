@@ -166,6 +166,29 @@ export async function changePassword(userId: number, oldPassword: string, newPas
   void logAudit('UPDATE', { entity_type: 'users', entity_id: userId, description: 'Password changed' });
 }
 
+// Admin-initiated reset — no knowledge of the old password required.
+export async function adminSetPassword(userId: number, newPassword: string): Promise<void> {
+  const { error } = await supabase.rpc('admin_set_password', {
+    p_user_id: userId,
+    p_new_password: newPassword,
+  });
+  if (error) throw new Error(error.message);
+  void logAudit('UPDATE', { entity_type: 'users', entity_id: userId, description: 'Password reset by admin' });
+}
+
+// Self-service reset from the login screen — verifies username + email match
+// an active account (no email/SMS channel is configured in this app to
+// deliver a reset link, so this identity check substitutes for one).
+export async function resetPasswordByIdentity(username: string, email: string, newPassword: string): Promise<void> {
+  const { error } = await supabase.rpc('reset_password_by_identity', {
+    p_username: username,
+    p_email: email,
+    p_new_password: newPassword,
+  });
+  if (error) throw new Error(error.message);
+  void logAudit('UPDATE', { entity_type: 'users', description: `Self-service password reset: ${username}` });
+}
+
 function parseUserAgent(ua: string): { device_type: string; os_name: string | null } {
   const device_type = /Mobile|Android|iPhone|iPad|iPod/i.test(ua) ? 'MOBILE' : 'DESKTOP';
   let os_name: string | null = null;
@@ -388,15 +411,38 @@ export async function fetchLocationById(id: number): Promise<Location | null> {
 // Access (user_buildings) — drives visibility
 // ---------------------------------------------------------------------------
 
+// A manager implicitly gets access to every building assigned anywhere below
+// them in the reporting line, so access never has to be re-assigned by hand
+// at each level. Walks the parent_user_id tree to find everyone who (directly
+// or transitively) reports to `rootId`, including the root itself.
+async function selfAndDescendantUserIds(rootId: number): Promise<number[]> {
+  const { data } = await supabase.from('users').select('id, parent_user_id');
+  const childrenByParent = new Map<number, number[]>();
+  for (const r of (data ?? []) as { id: number; parent_user_id: number | null }[]) {
+    if (r.parent_user_id == null) continue;
+    const list = childrenByParent.get(r.parent_user_id);
+    if (list) list.push(r.id);
+    else childrenByParent.set(r.parent_user_id, [r.id]);
+  }
+  const ids = [rootId];
+  for (let i = 0; i < ids.length; i++) {
+    for (const childId of childrenByParent.get(ids[i]) ?? []) {
+      if (!ids.includes(childId)) ids.push(childId);
+    }
+  }
+  return ids;
+}
+
 export async function visibleBuildingIds(user: AuthUser | null): Promise<number[] | null> {
   if (rolesAreAdmin(user?.roles)) return null; // all
   if (user?.id == null) return [];
+  const userIds = await selfAndDescendantUserIds(user.id);
   const { data } = await supabase
     .from('user_buildings')
     .select('building_id, deleted_at')
-    .eq('user_id', user.id)
+    .in('user_id', userIds)
     .is('deleted_at', null);
-  return (data ?? []).map((r) => r.building_id);
+  return Array.from(new Set((data ?? []).map((r) => r.building_id)));
 }
 
 // ---------------------------------------------------------------------------
@@ -1004,10 +1050,10 @@ export async function toggleUserActive(userId: number, isActive: boolean): Promi
 }
 
 export async function deleteUser(userId: number): Promise<void> {
-  await supabase.from('user_roles').delete().eq('user_id', userId);
-  await supabase.from('user_buildings').delete().eq('user_id', userId);
-  await supabase.from('user_alert_preferences').delete().eq('user_id', userId);
-  const { error } = await supabase.from('users').delete().eq('id', userId);
+  // Delegates to a SECURITY DEFINER RPC so FK-dependent rows (direct reports,
+  // login/action logs, audit trail) are cleared server-side in one
+  // transaction instead of racing/failing on client-side multi-table deletes.
+  const { error } = await supabase.rpc('delete_user_cascade', { p_user_id: userId });
   if (error) throw new Error(error.message);
   void logAudit('DELETE', { entity_type: 'users', entity_id: userId });
 }

@@ -1,11 +1,13 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ChevronLeft } from 'lucide-react';
 import {
   fetchRoles, fetchOrganizations, fetchBuildings, fetchUsers, fetchUserById,
-  createUser, updateUser, setUserRoles, setUserBuildings,
+  createUser, updateUser, setUserRoles, setUserBuildings, adminSetPassword,
 } from '@/services/api';
 import { useAuth } from '@/context/AuthContext';
+import { expectedManagerRole, rolesInclude, seniorMostLevel } from '@/lib/roles';
+import { validateNewPassword } from '@/lib/password';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -57,6 +59,13 @@ export default function UserFormPage() {
   const [submitError, setSubmitError] = useState('');
   const [showConfirm, setShowConfirm] = useState(false);
 
+  const [pwNew, setPwNew] = useState('');
+  const [pwConfirm, setPwConfirm] = useState('');
+  const [pwError, setPwError] = useState('');
+  const [pwSuccess, setPwSuccess] = useState('');
+  const [pwBusy, setPwBusy] = useState(false);
+  const [showPwConfirm, setShowPwConfirm] = useState(false);
+
   useEffect(() => {
     (async () => {
       try {
@@ -88,9 +97,60 @@ export default function UserFormPage() {
     setErrors((p) => (p[k] ? { ...p, [k]: undefined } : p));
     setSubmitError('');
   }
-  function toggle(list: 'roleIds' | 'buildingIds', val: number) {
-    setForm((p) => ({ ...p, [list]: p[list].includes(val) ? p[list].filter((x) => x !== val) : [...p[list], val] }));
+  function toggled<T>(list: T[], val: T): T[] {
+    return list.includes(val) ? list.filter((x) => x !== val) : [...list, val];
   }
+  function toggle(list: 'roleIds' | 'buildingIds', val: number) {
+    setForm((p) => ({ ...p, [list]: toggled(p[list], val) }));
+  }
+
+  function roleNamesFor(roleIds: number[]): string[] {
+    return roleIds.map((rid) => roles.find((r) => r.id === rid)?.role_name).filter((n): n is string => !!n);
+  }
+
+  // Toggling a role can change who's a valid manager for this user (the
+  // "Reports To" list only shows the role directly above); drop the current
+  // selection if it no longer qualifies.
+  function toggleRole(roleId: number) {
+    setForm((p) => {
+      const roleIds = toggled(p.roleIds, roleId);
+      const names = roleNamesFor(roleIds);
+      const seniorLvl = seniorMostLevel(names);
+      const mgrRole = expectedManagerRole(names);
+      let parent_user_id = p.parent_user_id;
+      if (parent_user_id && names.length > 0 && seniorLvl !== -1) {
+        const current = users.find((u) => String(u.id) === parent_user_id);
+        const stillValid = mgrRole != null && !!current && rolesInclude(current.roles, mgrRole);
+        if (!stillValid) parent_user_id = '';
+      }
+      return { ...p, roleIds, parent_user_id };
+    });
+  }
+
+  const selectedRoleNames = useMemo(() => roleNamesFor(form.roleIds), [form.roleIds, roles]);
+  const seniorLvl = useMemo(() => seniorMostLevel(selectedRoleNames), [selectedRoleNames]);
+  const mgrRole = useMemo(() => expectedManagerRole(selectedRoleNames), [selectedRoleNames]);
+  const eligibleManagers = useMemo(() => {
+    const base = selectedRoleNames.length === 0 || seniorLvl === -1
+      ? users.filter((u) => String(u.id) !== id)
+      : mgrRole == null ? [] : users.filter((u) => String(u.id) !== id && rolesInclude(u.roles, mgrRole));
+    // Always keep the currently-assigned manager selectable, even if a role
+    // change means they wouldn't be offered as a *new* choice — otherwise the
+    // dropdown would misleadingly show "No manager" for a user who has one.
+    if (form.parent_user_id && !base.some((u) => String(u.id) === form.parent_user_id)) {
+      const current = users.find((u) => String(u.id) === form.parent_user_id);
+      if (current) return [current, ...base];
+    }
+    return base;
+  }, [users, selectedRoleNames, seniorLvl, mgrRole, id, form.parent_user_id]);
+  const managerFieldDisabled = selectedRoleNames.length > 0 && seniorLvl !== -1 && mgrRole == null;
+  const managerHelpText = selectedRoleNames.length === 0
+    ? 'Pick a role above to see eligible managers.'
+    : seniorLvl === -1
+      ? 'Custom role — showing all users.'
+      : mgrRole == null
+        ? 'Top of the hierarchy — no manager needed.'
+        : `Showing ${mgrRole}s only.`;
 
   function validate(): boolean {
     const e: Errors = {};
@@ -139,6 +199,23 @@ export default function UserFormPage() {
     finally { setSubmitting(false); }
   }
 
+  function handlePasswordSaveClick() {
+    setPwError(''); setPwSuccess('');
+    const err = validateNewPassword(pwNew, pwConfirm);
+    if (err) { setPwError(err); return; }
+    setShowPwConfirm(true);
+  }
+
+  async function handlePasswordSubmit() {
+    setShowPwConfirm(false);
+    try {
+      setPwBusy(true);
+      await adminSetPassword(Number(id), pwNew);
+      setPwSuccess('Password updated.'); setPwNew(''); setPwConfirm('');
+    } catch (err) { setPwError(err instanceof Error ? err.message : 'Failed to update password.'); }
+    finally { setPwBusy(false); }
+  }
+
   if (loading) return <LoadingScreen />;
 
   return (
@@ -168,13 +245,18 @@ export default function UserFormPage() {
             </Select>
           </Field>
           <Field label="Reports To">
-            <Select value={form.parent_user_id || 'none'} onValueChange={(v) => update('parent_user_id', v === 'none' ? '' : v)}>
+            <Select
+              value={form.parent_user_id || 'none'}
+              onValueChange={(v) => update('parent_user_id', v === 'none' ? '' : v)}
+              disabled={managerFieldDisabled}
+            >
               <SelectTrigger><SelectValue placeholder="No manager" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="none">— No manager —</SelectItem>
-                {users.filter((u) => String(u.id) !== id).map((u) => <SelectItem key={u.id} value={String(u.id)}>{u.username}</SelectItem>)}
+                {eligibleManagers.map((u) => <SelectItem key={u.id} value={String(u.id)}>{u.username}</SelectItem>)}
               </SelectContent>
             </Select>
+            <p className="mt-1 text-xs text-muted-foreground">{managerHelpText}</p>
           </Field>
         </div>
 
@@ -183,7 +265,7 @@ export default function UserFormPage() {
           <div className="mt-1.5 grid grid-cols-2 gap-2 rounded-md border border-border bg-background p-3 sm:grid-cols-3">
             {roles.map((r) => (
               <label key={r.id} className="flex cursor-pointer items-center gap-2 text-sm">
-                <Checkbox checked={form.roleIds.includes(r.id)} onCheckedChange={() => toggle('roleIds', r.id)} /> {r.role_name}
+                <Checkbox checked={form.roleIds.includes(r.id)} onCheckedChange={() => toggleRole(r.id)} /> {r.role_name}
               </label>
             ))}
             {roles.length === 0 && <span className="text-sm text-muted-foreground">No roles defined.</span>}
@@ -228,6 +310,28 @@ export default function UserFormPage() {
         </div>
       </Card>
 
+      {isEditing && (
+        <Card className="p-6">
+          <h4 className="mb-4 font-semibold">Change Password</h4>
+          <p className="mb-4 text-xs text-muted-foreground">Set a new password for this user directly. They won't need to know their old one.</p>
+          {pwSuccess && <div className="mb-4 rounded-md border border-ok-border bg-ok-bg px-3 py-2 text-sm text-ok-text">{pwSuccess}</div>}
+          {pwError && <div className="mb-4 rounded-md border border-crit-border bg-crit-bg px-3 py-2 text-sm text-crit-text">{pwError}</div>}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Field label="New Password">
+              <PasswordInput value={pwNew} onChange={(e) => { setPwNew(e.target.value); setPwError(''); }} placeholder="Min. 8 characters" />
+            </Field>
+            <Field label="Confirm New Password">
+              <PasswordInput value={pwConfirm} onChange={(e) => { setPwConfirm(e.target.value); setPwError(''); }} />
+            </Field>
+          </div>
+          <div className="mt-4 flex justify-end">
+            <Button onClick={handlePasswordSaveClick} disabled={pwBusy || (!pwNew && !pwConfirm)}>
+              {pwBusy ? 'Updating…' : 'Update Password'}
+            </Button>
+          </div>
+        </Card>
+      )}
+
       <ConfirmDialog
         open={showConfirm}
         onOpenChange={setShowConfirm}
@@ -236,6 +340,17 @@ export default function UserFormPage() {
         confirmLabel={isEditing ? 'Save Changes' : 'Create User'}
         onConfirm={handleSubmit}
         loading={submitting}
+      />
+
+      <ConfirmDialog
+        open={showPwConfirm}
+        onOpenChange={setShowPwConfirm}
+        title="Change this user's password?"
+        description={`"${form.username}" will need to sign in with the new password. This can't be undone.`}
+        confirmLabel="Update Password"
+        variant="destructive"
+        onConfirm={handlePasswordSubmit}
+        loading={pwBusy}
       />
     </section>
   );

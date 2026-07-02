@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { Flame, Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useAppSettings } from '@/context/AppSettingsContext';
@@ -20,7 +20,7 @@ export default function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const from = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname || '/devices';
+  const from = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname || '/buildings';
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -67,7 +67,10 @@ export default function LoginPage() {
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="password">Password</Label>
+            <div className="flex items-center justify-between">
+              <Label htmlFor="password">Password</Label>
+              <Link to="/forgot-password" className="text-xs font-medium text-accent hover:underline">Forgot password?</Link>
+            </div>
             <div className="relative">
               <Input
                 id="password"
