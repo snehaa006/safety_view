@@ -85,7 +85,15 @@ export default function UserManagementPage() {
   function openDelete(u: ManagedUser) { setDeleteTarget(u); setConfirmName(''); setConfirmAck(false); }
   async function confirmDelete() {
     if (!deleteTarget) return;
-    try { setDeleting(true); await deleteUser(deleteTarget.id); setUsers((p) => p.filter((x) => x.id !== deleteTarget.id)); setDeleteTarget(null); }
+    try {
+      setDeleting(true);
+      await deleteUser(deleteTarget.id);
+      setDeleteTarget(null);
+      // Re-fetch rather than just filtering local state: deleting a manager
+      // re-points their direct reports' "Reports To" server-side, and the
+      // table needs to reflect that reparenting too.
+      await loadAll();
+    }
     catch (err) { setError(err instanceof Error ? err.message : 'Failed to delete'); }
     finally { setDeleting(false); }
   }

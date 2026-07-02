@@ -5,7 +5,7 @@ import { isAdminUser } from '@/lib/roles';
 export default function AdminRoute() {
   const { user } = useAuth();
   if (!isAdminUser(user)) {
-    return <Navigate to="/devices" replace />;
+    return <Navigate to="/buildings" replace />;
   }
   return <Outlet />;
 }

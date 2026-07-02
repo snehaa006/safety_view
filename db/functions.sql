@@ -207,6 +207,87 @@ select u.id, r.id
    );
 
 -- ============================================================================
--- 7. Refresh PostgREST's schema cache so new functions are callable immediately.
+-- 8. delete_user_cascade — hard-deletes a user and clears everything that
+--    would otherwise block the delete via foreign keys:
+--      - direct reports are re-pointed to the deleted user's own manager
+--        (so the reporting chain isn't broken, instead of being orphaned)
+--      - role/building assignments and alert preferences are removed
+--      - login_logs / action_logs rows for the user are removed outright:
+--        these are per-user activity logs (not a shared audit trail) and,
+--        unlike audit_log, their user_id columns are NOT NULL, so detaching
+--        them by nulling isn't an option without a schema change.
+--      - audit_log rows are kept for history but detached (user_id -> null),
+--        since audit_log has no direct app-role policy and is only reachable
+--        through SECURITY DEFINER functions like this one.
+--    NOTE: if your schema also has an alert_notifications table with a FK to
+--    users, add its cleanup here too — it isn't referenced anywhere else in
+--    this app's frontend so it's left alone rather than guessed at.
+-- ============================================================================
+create or replace function public.delete_user_cascade(p_user_id integer)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare v_parent integer;
+begin
+  if not exists (select 1 from users where id = p_user_id) then
+    raise exception 'User % not found', p_user_id;
+  end if;
+
+  select parent_user_id into v_parent from users where id = p_user_id;
+  if v_parent = p_user_id then
+    v_parent := null; -- guard against corrupted self-referencing data
+  end if;
+
+  update users set parent_user_id = v_parent, updated_at = now()
+   where parent_user_id = p_user_id;
+
+  delete from user_roles where user_id = p_user_id;
+  delete from user_buildings where user_id = p_user_id;
+  delete from user_alert_preferences where user_id = p_user_id;
+  delete from login_logs where user_id = p_user_id;
+  delete from action_logs where user_id = p_user_id;
+  update audit_log set user_id = null where user_id = p_user_id;
+
+  delete from users where id = p_user_id;
+end;
+$$;
+grant execute on function public.delete_user_cascade(integer) to anon, authenticated;
+
+-- ============================================================================
+-- 9. reset_password_by_identity — self-service "forgot password" without a
+--    login session. This app has no email/SMS channel configured to deliver
+--    a reset link, so as a substitute the caller must prove they know both
+--    the username AND the email on file for an active account; if that
+--    matches, the password is set directly.
+-- ============================================================================
+create or replace function public.reset_password_by_identity(
+  p_username text, p_email text, p_new_password text
+)
+returns void
+language plpgsql
+security definer
+set search_path = public, extensions
+as $$
+declare v_matched integer;
+begin
+  update users
+     set hashed_password = extensions.crypt(p_new_password, extensions.gen_salt('bf', 12)),
+         updated_at = now()
+   where lower(username) = lower(p_username)
+     and lower(email) = lower(p_email)
+     and is_active = true;
+
+  get diagnostics v_matched = row_count;
+  if v_matched = 0 then
+    raise exception 'We could not verify an account with that username and email.';
+  end if;
+end;
+$$;
+grant execute on function public.reset_password_by_identity(text, text, text) to anon, authenticated;
+
+-- ============================================================================
+-- 10. Refresh PostgREST's schema cache so new functions are callable immediately.
 -- ============================================================================
 notify pgrst, 'reload schema';
