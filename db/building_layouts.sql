@@ -51,12 +51,17 @@ create index if not exists building_layouts_updated_at_idx
 create index if not exists building_layouts_created_by_idx
   on public.building_layouts (created_by);
 
--- 4. RLS — same permissive app policy used by the operational tables ---------
+-- 4. Grants — a table created via raw SQL does not inherit Supabase's default
+--    privileges, so grant the app roles table access explicitly (without this
+--    PostgREST returns "permission denied for table building_layouts").
+grant select, insert, update, delete on public.building_layouts to anon, authenticated;
+
+-- 5. RLS — same permissive app policy used by the operational tables ---------
 --    (anon key is public; for production prefer a backend/service-role.)
 alter table public.building_layouts enable row level security;
 drop policy if exists "app_all" on public.building_layouts;
 create policy "app_all" on public.building_layouts
   for all to anon, authenticated using (true) with check (true);
 
--- 5. Refresh PostgREST's schema cache so the table is queryable immediately. --
+-- 6. Refresh PostgREST's schema cache so the table is queryable immediately. --
 notify pgrst, 'reload schema';
