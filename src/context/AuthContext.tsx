@@ -7,6 +7,7 @@ import {
   type ReactNode,
 } from 'react';
 import { login as apiLogin, logout as apiLogout, getToken, decodeToken, setAuditActor } from '@/services/api';
+import { setLayoutActor } from '@/features/zone-editor/storage';
 import type { AuthUser } from '@/types';
 
 interface AuthContextValue {
@@ -29,6 +30,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const payload = decodeToken(token);
       if (payload && payload.exp > Date.now()) {
         setAuditActor(payload.id);
+        setLayoutActor(payload.id);
         setUser({
           id: payload.id,
           username: payload.sub,
@@ -44,12 +46,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(async (username: string, password: string) => {
     const { user: loggedInUser } = await apiLogin(username, password);
+    setLayoutActor(loggedInUser.id);
     setUser(loggedInUser);
     return loggedInUser;
   }, []);
 
   const logout = useCallback(() => {
     apiLogout();
+    setLayoutActor(null);
     setUser(null);
   }, []);
 

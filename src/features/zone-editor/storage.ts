@@ -1,15 +1,15 @@
 // ---------------------------------------------------------------------------
 // Layout persistence. Defined behind a `LayoutStore` interface so the backing
-// store can be swapped (localStorage today; a Supabase `building_layouts` table
-// or a JSON column later) without touching the editor UI.
+// store can be swapped without touching the editor UI.
 //
-// Layouts include a base64 background image, so they can be large — localStorage
-// is a pragmatic default that keeps the graphics editor fully self-contained and
-// working with no schema changes.
+// The default store is Supabase (the `public.building_layouts` table — see
+// db/building_layouts.sql). A localStorage store is kept as an offline/testing
+// fallback and as a reference implementation of the interface.
 // ---------------------------------------------------------------------------
 
 import { emptyScene } from '@/graphics';
-import type { BuildingLayout } from './types';
+import { supabase } from '@/services/supabase';
+import type { BuildingLayout, EditorZone } from './types';
 
 export interface LayoutStore {
   list(): Promise<BuildingLayout[]>;
@@ -28,10 +28,79 @@ export function newLayout(name: string): BuildingLayout {
   return { id: uid(), name: name.trim() || 'Untitled Building', zones: [], scene: emptyScene(), createdAt: now, updatedAt: now };
 }
 
-const DEFAULT_KEY = 'sv_zone_layouts';
+// The user whose id is stamped as `created_by` on new layouts. Set from the
+// auth context (mirrors setAuditActor in services/api.ts).
+let layoutActorId: number | null = null;
+export function setLayoutActor(id: number | null): void {
+  layoutActorId = id;
+}
+
+// ---------------------------------------------------------------------------
+// Supabase-backed store (default)
+// ---------------------------------------------------------------------------
+
+const TABLE = 'building_layouts';
+const ROW_COLS = 'id, name, zones, scene, created_at, updated_at';
+
+function rowToLayout(r: Record<string, unknown>): BuildingLayout {
+  return {
+    id: String(r.id),
+    name: (r.name as string) ?? 'Untitled Building',
+    zones: (r.zones as EditorZone[]) ?? [],
+    scene: (r.scene as BuildingLayout['scene']) ?? emptyScene(),
+    createdAt: (r.created_at as string) ?? new Date().toISOString(),
+    updatedAt: (r.updated_at as string) ?? new Date().toISOString(),
+  };
+}
+
+class SupabaseLayoutStore implements LayoutStore {
+  async list(): Promise<BuildingLayout[]> {
+    const { data, error } = await supabase.from(TABLE).select(ROW_COLS).order('updated_at', { ascending: false });
+    if (error) throw new Error(error.message);
+    return (data ?? []).map((r) => rowToLayout(r as Record<string, unknown>));
+  }
+
+  async get(id: string): Promise<BuildingLayout | null> {
+    const { data, error } = await supabase.from(TABLE).select(ROW_COLS).eq('id', id).maybeSingle();
+    if (error) throw new Error(error.message);
+    return data ? rowToLayout(data as Record<string, unknown>) : null;
+  }
+
+  async create(name: string): Promise<BuildingLayout> {
+    const { data, error } = await supabase
+      .from(TABLE)
+      .insert({ name: name.trim() || 'Untitled Building', created_by: layoutActorId })
+      .select(ROW_COLS)
+      .single();
+    if (error) throw new Error(error.message);
+    return rowToLayout(data as Record<string, unknown>);
+  }
+
+  async save(layout: BuildingLayout): Promise<BuildingLayout> {
+    const { data, error } = await supabase
+      .from(TABLE)
+      .update({ name: layout.name.trim() || 'Untitled Building', zones: layout.zones, scene: layout.scene })
+      .eq('id', layout.id)
+      .select(ROW_COLS)
+      .single();
+    if (error) throw new Error(error.message);
+    return rowToLayout(data as Record<string, unknown>);
+  }
+
+  async remove(id: string): Promise<void> {
+    const { error } = await supabase.from(TABLE).delete().eq('id', id);
+    if (error) throw new Error(error.message);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// localStorage store (offline / testing fallback)
+// ---------------------------------------------------------------------------
+
+const LOCAL_KEY = 'sv_zone_layouts';
 
 class LocalLayoutStore implements LayoutStore {
-  constructor(private readonly key = DEFAULT_KEY) {}
+  constructor(private readonly key = LOCAL_KEY) {}
 
   private readAll(): BuildingLayout[] {
     try {
@@ -48,7 +117,6 @@ class LocalLayoutStore implements LayoutStore {
     try {
       localStorage.setItem(this.key, JSON.stringify(layouts));
     } catch (err) {
-      // Quota exceeded is the realistic failure (large background images).
       throw new Error(
         err instanceof DOMException && err.name === 'QuotaExceededError'
           ? 'Storage is full — try a smaller background image or delete an old building.'
@@ -86,7 +154,13 @@ class LocalLayoutStore implements LayoutStore {
   }
 }
 
-/** The store used by the app. Swap this factory to change the backend. */
+const supabaseStore = new SupabaseLayoutStore();
+
+/** The store used by the app. Swap the returned instance to change backends. */
 export function getLayoutStore(): LayoutStore {
+  return supabaseStore;
+}
+
+export function getLocalLayoutStore(): LayoutStore {
   return new LocalLayoutStore();
 }
