@@ -63,7 +63,7 @@ export default function RoleFormPage() {
         <div className="flex flex-col gap-4">
           <div className="flex flex-col gap-1.5">
             <Label>Role Name</Label>
-            <Input value={name} onChange={(e) => { setName(e.target.value); setError(''); }} placeholder="e.g. Regional Manager" />
+            <Input value={name} onChange={(e) => { setName(e.target.value); setError(''); }} placeholder="e.g. REGIONAL_MANAGER" />
           </div>
           <div className="flex flex-col gap-1.5">
             <Label>Description</Label>

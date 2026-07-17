@@ -10,12 +10,12 @@ export type ManualAction = 'TEST' | 'HOOTER_ON' | 'HOOTER_OFF' | 'RESET';
 export type AuditAction = 'CREATE' | 'UPDATE' | 'DELETE' | 'LOGIN' | 'LOGOUT' | 'LOGIN_FAILED';
 
 export const ROLE_NAMES = [
-  'Super Admin',
-  'National Manager',
-  'Regional Manager',
-  'District Manager',
-  'Supervisor',
-  'Building Operator',
+  'SUPER_ADMIN',
+  'NATIONAL_MANAGER',
+  'REGIONAL_MANAGER',
+  'DISTRICT_MANAGER',
+  'SUPERVISOR',
+  'BUILDING_OPERATOR',
 ] as const;
 
 export const MANUAL_ACTIONS: ManualAction[] = ['TEST', 'HOOTER_ON', 'HOOTER_OFF', 'RESET'];

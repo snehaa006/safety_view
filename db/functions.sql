@@ -193,14 +193,14 @@ end $$;
 -- 6. SEED — the six designation roles + give the "admin" user Super Admin.
 -- ============================================================================
 insert into roles (role_name) values
-  ('Super Admin'), ('National Manager'), ('Regional Manager'),
-  ('District Manager'), ('Supervisor'), ('Building Operator')
+  ('SUPER_ADMIN'), ('NATIONAL_MANAGER'), ('REGIONAL_MANAGER'),
+  ('DISTRICT_MANAGER'), ('SUPERVISOR'), ('BUILDING_OPERATOR')
 on conflict (role_name) do nothing;
 
 insert into user_roles (user_id, role_id)
 select u.id, r.id
   from users u, roles r
- where u.username = 'admin' and r.role_name = 'Super Admin'
+ where u.username = 'admin' and r.role_name = 'SUPER_ADMIN'
    and not exists (
      select 1 from user_roles ur
       where ur.user_id = u.id and ur.role_id = r.id and ur.deleted_at is null
