@@ -1,35 +1,39 @@
 -- ============================================================================
--- SafetyView — Zone Editor: building_layouts table
+-- SafetyView — Mimic (graphic) view for buildings: building_layouts table
 --
--- Backs the graphics-based Zone Editor. Each row is one building layout:
--- a name, the list of zones, and the graphics "scene" (background image +
--- shapes, where every shape references a zone by id). `zones` and `scene`
--- are stored as JSONB produced by the @/graphics engine's serializer.
+-- A building's "mimic view" is a second, graphical view of an EXISTING
+-- building (the operational Static view is the panels/zones list). Each
+-- building has at most one mimic layout: a background floor-plan image plus
+-- shapes, where every shape references a REAL zone by id (public.zones.id) so
+-- the drawn shape shows that zone's live fire/fault status.
+--
+-- The layout is stored as the @/graphics engine's JSON "scene". Zone
+-- name/state/reading are NOT copied here — they are read live from the zones
+-- table via the zone id embedded in each shape's `data`.
 --
 -- Run this whole file once in the Supabase SQL Editor. It is idempotent and
--- follows the same RLS convention as db/functions.sql (permissive app_all
--- policy for the anon/authenticated app roles).
+-- follows the same RLS convention as db/functions.sql.
 --
--- NOTE: the uploaded floor-plan image is embedded in scene.background.src as a
--- base64 data URL. That's fine for typical plans; for very large images prefer
--- Supabase Storage and keep only the object URL here.
+-- NOTE: this REPLACES the earlier standalone building_layouts schema (which
+-- had its own name + embedded zones). The drop below removes that version;
+-- any layouts created against it are discarded.
 -- ============================================================================
 
--- 1. Table -------------------------------------------------------------------
-create table if not exists public.building_layouts (
-  id         uuid primary key default gen_random_uuid(),
-  name       text not null default 'Untitled Building',
-  zones      jsonb not null default '[]'::jsonb,
-  scene      jsonb not null default '{"shapes":[],"background":null}'::jsonb,
-  created_by integer references public.users(id) on delete set null,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+drop table if exists public.building_layouts cascade;
+
+-- 1. Table (one mimic layout per building) -----------------------------------
+create table public.building_layouts (
+  building_id bigint primary key references public.buildings(id) on delete cascade,
+  scene       jsonb not null default '{"shapes":[],"background":null}'::jsonb,
+  created_by  integer references public.users(id) on delete set null,
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now()
 );
 
 comment on table public.building_layouts is
-  'Zone Editor layouts: name + zones (jsonb) + graphics scene (jsonb, includes background image and shapes).';
+  'Mimic (graphic) view per building: a @/graphics scene (background image + shapes). Each shape references a real zone via scene.shapes[].data.zoneId.';
 
--- 2. Keep updated_at fresh on every update ----------------------------------
+-- 2. Keep updated_at fresh on every update -----------------------------------
 create or replace function public.set_updated_at()
 returns trigger
 language plpgsql
@@ -45,23 +49,17 @@ create trigger trg_building_layouts_updated_at
   before update on public.building_layouts
   for each row execute function public.set_updated_at();
 
--- 3. Indexes -----------------------------------------------------------------
-create index if not exists building_layouts_updated_at_idx
-  on public.building_layouts (updated_at desc);
-create index if not exists building_layouts_created_by_idx
-  on public.building_layouts (created_by);
-
--- 4. Grants — a table created via raw SQL does not inherit Supabase's default
+-- 3. Grants — a table created via raw SQL does not inherit Supabase's default
 --    privileges, so grant the app roles table access explicitly (without this
 --    PostgREST returns "permission denied for table building_layouts").
 grant select, insert, update, delete on public.building_layouts to anon, authenticated;
 
--- 5. RLS — same permissive app policy used by the operational tables ---------
+-- 4. RLS — same permissive app policy used by the operational tables ---------
 --    (anon key is public; for production prefer a backend/service-role.)
 alter table public.building_layouts enable row level security;
 drop policy if exists "app_all" on public.building_layouts;
 create policy "app_all" on public.building_layouts
   for all to anon, authenticated using (true) with check (true);
 
--- 6. Refresh PostgREST's schema cache so the table is queryable immediately. --
+-- 5. Refresh PostgREST's schema cache so the table is queryable immediately. --
 notify pgrst, 'reload schema';

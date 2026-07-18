@@ -1,182 +1,108 @@
 // ---------------------------------------------------------------------------
-// Pops up the moment a shape is drawn: create a brand-new zone, or assign the
-// shape to an existing zone (so one zone can span several shapes). Cancelling
-// removes the just-drawn shape.
+// Assign a drawn shape to one of the building's REAL zones. Zones come from the
+// operational model (panels → zones); this dialog only links a shape to one of
+// them. A zone may be linked by more than one shape (e.g. a zone spanning
+// several areas of a plan), so already-placed zones are marked but still
+// selectable.
 // ---------------------------------------------------------------------------
 
 import { useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
-import type { ZoneState } from '@/types';
-import { MAX_ZONES, ZONE_STATES, ZONE_TYPES, type EditorZone } from './types';
+import type { ZoneWithContext } from '@/services/api';
 import { zoneColors } from './zoneStyle';
-
-function zoneUid(): string {
-  return `zone_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
-}
-
-export interface ZoneAssignResult {
-  create?: EditorZone;
-  assignZoneId?: string;
-}
 
 export default function ZoneAssignDialog({
   open,
   zones,
+  placedZoneIds,
+  currentZoneId,
   onCancel,
-  onResolve,
+  onAssign,
 }: {
   open: boolean;
-  zones: EditorZone[];
+  zones: ZoneWithContext[];
+  placedZoneIds: Set<number>;
+  currentZoneId?: number | null;
   onCancel: () => void;
-  onResolve: (result: ZoneAssignResult) => void;
+  onAssign: (zoneId: number) => void;
 }) {
-  const usedNumbers = useMemo(() => new Set(zones.map((z) => z.number)), [zones]);
-  const availableNumbers = useMemo(
-    () => Array.from({ length: MAX_ZONES }, (_, i) => i + 1).filter((n) => !usedNumbers.has(n)),
-    [usedNumbers],
-  );
-  const firstAvailable = availableNumbers[0] ?? 1;
-
-  const [mode, setMode] = useState<'new' | 'existing'>(zones.length > 0 ? 'new' : 'new');
-  const [number, setNumber] = useState<number>(firstAvailable);
-  const [name, setName] = useState('');
-  const [type, setType] = useState<string>(ZONE_TYPES[0]);
-  const [state, setState] = useState<ZoneState>('HEALTHY');
-  const [assignId, setAssignId] = useState<string>(zones[0]?.id ?? '');
-
-  // Re-seed defaults whenever the dialog re-opens for a new shape.
-  const [seededFor, setSeededFor] = useState<boolean>(false);
-  if (open && !seededFor) {
-    setNumber(firstAvailable);
-    setName('');
-    setType(ZONE_TYPES[0]);
-    setState('HEALTHY');
-    setMode('new');
-    setAssignId(zones[0]?.id ?? '');
-    setSeededFor(true);
+  const [selected, setSelected] = useState<number | null>(currentZoneId ?? null);
+  const [seeded, setSeeded] = useState(false);
+  if (open && !seeded) {
+    setSelected(currentZoneId ?? null);
+    setSeeded(true);
   }
-  if (!open && seededFor) setSeededFor(false);
+  if (!open && seeded) setSeeded(false);
 
-  const canCreateNew = availableNumbers.length > 0;
-
-  function submit() {
-    if (mode === 'existing') {
-      if (!assignId) return;
-      onResolve({ assignZoneId: assignId });
-      return;
+  const groups = useMemo(() => {
+    const byPanel = new Map<string, ZoneWithContext[]>();
+    for (const z of zones) {
+      const key = z.panel_name || z.panel_code;
+      const arr = byPanel.get(key) ?? [];
+      arr.push(z);
+      byPanel.set(key, arr);
     }
-    onResolve({
-      create: { id: zoneUid(), number, name: name.trim() || `Zone ${number}`, type, state, reading: null },
-    });
-  }
+    return Array.from(byPanel.entries());
+  }, [zones]);
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onCancel(); }}>
       <DialogContent onEscapeKeyDown={onCancel} onInteractOutside={(e) => e.preventDefault()}>
         <DialogHeader>
-          <DialogTitle>Assign a Zone to this shape</DialogTitle>
+          <DialogTitle>Link this shape to a zone</DialogTitle>
           <DialogDescription>
-            Create a new zone or link this shape to one that already exists. The shape becomes the graphical
-            representation of that zone.
+            Pick the zone this shape represents. It will show that zone’s live status and update automatically.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex gap-1 rounded-md bg-secondary p-1">
-          {(['new', 'existing'] as const).map((m) => (
-            <button
-              key={m}
-              type="button"
-              onClick={() => setMode(m)}
-              disabled={m === 'existing' && zones.length === 0}
-              className={cn(
-                'flex-1 rounded px-3 py-1.5 text-sm font-medium transition-colors disabled:opacity-40',
-                mode === m ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground',
-              )}
-            >
-              {m === 'new' ? 'New Zone' : `Existing Zone (${zones.length})`}
-            </button>
-          ))}
-        </div>
-
-        {mode === 'new' ? (
-          !canCreateNew ? (
-            <div className="rounded-md border border-warn-border bg-warn-bg px-4 py-3 text-sm text-warn-text">
-              All {MAX_ZONES} zones are already defined. Switch to “Existing Zone” to reuse one.
-            </div>
-          ) : (
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label>Zone Number</Label>
-                <Select value={String(number)} onValueChange={(v) => setNumber(Number(v))}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {availableNumbers.map((n) => (
-                      <SelectItem key={n} value={String(n)}>Zone {n}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1.5">
-                <Label>Initial State</Label>
-                <Select value={state} onValueChange={(v) => setState(v as ZoneState)}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {ZONE_STATES.map((s) => (
-                      <SelectItem key={s} value={s}>{zoneColors(s).label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="col-span-2 space-y-1.5">
-                <Label htmlFor="zone-name">Zone Name</Label>
-                <Input id="zone-name" value={name} onChange={(e) => setName(e.target.value)} placeholder={`e.g. Platform Level ${number}`} autoFocus />
-              </div>
-              <div className="col-span-2 space-y-1.5">
-                <Label>Zone Type</Label>
-                <Select value={type} onValueChange={setType}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {ZONE_TYPES.map((t) => (
-                      <SelectItem key={t} value={t}>{t}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-          )
+        {zones.length === 0 ? (
+          <div className="rounded-md border border-warn-border bg-warn-bg px-4 py-3 text-sm text-warn-text">
+            This building has no zones yet. Add panels and zones first, then draw the mimic view over them.
+          </div>
         ) : (
-          <div className="space-y-1.5">
-            <Label>Choose an existing zone</Label>
-            <Select value={assignId} onValueChange={setAssignId}>
-              <SelectTrigger><SelectValue placeholder="Select a zone" /></SelectTrigger>
-              <SelectContent>
-                {zones
-                  .slice()
-                  .sort((a, b) => a.number - b.number)
-                  .map((z) => (
-                    <SelectItem key={z.id} value={z.id}>
-                      Zone {z.number} — {z.name}
-                    </SelectItem>
-                  ))}
-              </SelectContent>
-            </Select>
-            <p className="text-xs text-muted-foreground">
-              The shape will mirror the selected zone’s live state and update whenever that zone changes.
-            </p>
+          <div className="max-h-[45vh] space-y-3 overflow-y-auto pr-1">
+            {groups.map(([panel, panelZones]) => (
+              <div key={panel} className="space-y-1">
+                <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{panel}</div>
+                <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
+                  {panelZones.map((z) => {
+                    const c = zoneColors(z.current_state);
+                    const isSel = selected === z.id;
+                    return (
+                      <button
+                        key={z.id}
+                        type="button"
+                        onClick={() => setSelected(z.id)}
+                        className={cn(
+                          'flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-left text-sm transition-colors',
+                          isSel ? 'border-primary ring-1 ring-primary' : 'border-border hover:bg-secondary',
+                        )}
+                      >
+                        <span className="h-3 w-3 shrink-0 rounded-sm" style={{ background: c.fill, border: `1px solid ${c.stroke}` }} />
+                        <span className="min-w-0 flex-1">
+                          <span className="font-semibold">Zone {z.zone_number}</span>
+                          <span className="ml-1 truncate text-muted-foreground">{z.zone_name}</span>
+                        </span>
+                        {placedZoneIds.has(z.id) && z.id !== currentZoneId && (
+                          <span className="shrink-0 rounded bg-secondary px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">placed</span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
           </div>
         )}
 
         <DialogFooter>
           <Button variant="outline" onClick={onCancel}>Cancel</Button>
-          <Button onClick={submit} disabled={mode === 'new' ? !canCreateNew : !assignId}>
-            {mode === 'new' ? 'Create & Assign' : 'Assign Zone'}
+          <Button onClick={() => selected != null && onAssign(selected)} disabled={selected == null}>
+            Link Zone
           </Button>
         </DialogFooter>
       </DialogContent>

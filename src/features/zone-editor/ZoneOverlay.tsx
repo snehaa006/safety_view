@@ -1,14 +1,14 @@
 // ---------------------------------------------------------------------------
-// The content drawn *inside* a shape (Figma-style). Rendered by the graphics
-// engine via the `renderShapeOverlay` render prop, in world space, so it scales
-// with zoom. Pointer events are disabled so the shape underneath stays
-// interactive.
+// Content drawn inside a shape (Figma-style), rendered by the graphics engine
+// via `renderShapeOverlay`. Shows the linked zone's LIVE data (number, name,
+// current state, reading). Pointer events are disabled so the shape underneath
+// stays interactive.
 // ---------------------------------------------------------------------------
 
-import type { EditorZone } from './types';
+import type { Zone } from '@/types';
 import { UNASSIGNED_COLORS, zoneColors } from './zoneStyle';
 
-export default function ZoneOverlay({ zone, compact }: { zone: EditorZone | null; compact?: boolean }) {
+export default function ZoneOverlay({ zone, compact }: { zone: Zone | null; compact?: boolean }) {
   if (!zone) {
     return (
       <div
@@ -31,7 +31,7 @@ export default function ZoneOverlay({ zone, compact }: { zone: EditorZone | null
     );
   }
 
-  const c = zoneColors(zone.state);
+  const c = zoneColors(zone.current_state);
   return (
     <div
       style={{
@@ -50,11 +50,11 @@ export default function ZoneOverlay({ zone, compact }: { zone: EditorZone | null
       }}
     >
       <div style={{ fontWeight: 800, fontSize: compact ? 13 : 16, lineHeight: 1.1, letterSpacing: '0.02em' }}>
-        ZONE-{zone.number}
+        ZONE-{zone.zone_number}
       </div>
-      {!compact && zone.name && (
+      {!compact && zone.zone_name && (
         <div style={{ fontWeight: 600, fontSize: 11, lineHeight: 1.15, maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          {zone.name}
+          {zone.zone_name}
         </div>
       )}
       <div
@@ -73,8 +73,8 @@ export default function ZoneOverlay({ zone, compact }: { zone: EditorZone | null
         <span style={{ width: 6, height: 6, borderRadius: 999, background: '#fff', opacity: 0.9 }} />
         {c.label}
       </div>
-      {!compact && zone.reading != null && (
-        <div style={{ fontSize: 10, fontWeight: 600, opacity: 0.85 }}>{zone.reading}</div>
+      {!compact && zone.current_reading != null && (
+        <div style={{ fontSize: 10, fontWeight: 600, opacity: 0.85 }}>{zone.current_reading}</div>
       )}
     </div>
   );

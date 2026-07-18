@@ -1,7 +1,7 @@
 import { NavLink } from 'react-router-dom';
 import {
   Bell, Building2, ClipboardList, Cpu, Droplet, FileBarChart2, FolderTree, KeyRound,
-  LogIn, MapPin, PenTool, ShieldCheck, User, Users, Warehouse,
+  LogIn, MapPin, ShieldCheck, User, Users, Warehouse,
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useAppSettings } from '@/context/AppSettingsContext';
@@ -19,7 +19,6 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/buildings', label: 'Overview', icon: Warehouse },
   { to: '/alerts', label: 'Alerts', icon: Bell },
   { to: '/reports', label: 'Reports', icon: FileBarChart2 },
-  { to: '/zone-editor', label: 'Zone Editor', icon: PenTool },
   { to: '/building-management', label: 'Building Management', icon: Building2, adminOnly: true },
   { to: '/panel-management', label: 'Panel Management', icon: Cpu, adminOnly: true },
   { to: '/groups', label: 'Groups', icon: FolderTree, adminOnly: true },
