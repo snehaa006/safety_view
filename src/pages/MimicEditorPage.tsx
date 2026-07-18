@@ -249,7 +249,8 @@ export default function MimicEditorPage() {
     (shape: Shape) => {
       const zone = zonesById.get(zoneIdOf(shape.data) ?? -1) ?? null;
       const c = zoneColors(zone?.current_state);
-      return { fill: c.fill, stroke: c.stroke, fillOpacity: shape.type === 'line' ? 1 : 0.4 };
+      // Denser fill + thicker border so zones stay legible over a busy floor plan.
+      return { fill: c.fill, stroke: c.stroke, fillOpacity: shape.type === 'line' ? 1 : 0.6, strokeWidth: 3 };
     },
     [zonesById],
   );
