@@ -1,7 +1,8 @@
 // ---------------------------------------------------------------------------
 // Maps a zone state to concrete SVG colours for the graphics engine. Kept in
 // sync (semantically) with ZONE_STATE_META in @/utils/format, but expressed as
-// raw hex because SVG fills can't use Tailwind classes.
+// raw hex because SVG fills can't use Tailwind classes. Bold, saturated fills
+// with darker borders so zones read clearly over a floor-plan photo.
 // ---------------------------------------------------------------------------
 
 import type { ZoneState } from '@/types';
@@ -14,16 +15,16 @@ export interface ZoneColors {
 }
 
 export const ZONE_COLORS: Record<ZoneState, ZoneColors> = {
-  HEALTHY: { fill: '#22c55e', stroke: '#15803d', text: '#14532d', label: 'Healthy' },
-  FIRE: { fill: '#ef4444', stroke: '#b91c1c', text: '#7f1d1d', label: 'Fire' },
-  FAULT: { fill: '#f59e0b', stroke: '#b45309', text: '#78350f', label: 'Fault' },
-  ISOLATION: { fill: '#9ca3af', stroke: '#4b5563', text: '#1f2937', label: 'Isolation' },
+  HEALTHY: { fill: '#16a34a', stroke: '#14532d', text: '#052e16', label: 'Healthy' },
+  FIRE: { fill: '#dc2626', stroke: '#7f1d1d', text: '#450a0a', label: 'Fire' },
+  FAULT: { fill: '#d97706', stroke: '#78350f', text: '#451a03', label: 'Fault' },
+  ISOLATION: { fill: '#6b7280', stroke: '#1f2937', text: '#111827', label: 'Isolation' },
 };
 
 export const UNASSIGNED_COLORS: ZoneColors = {
-  fill: '#94a3b8',
-  stroke: '#475569',
-  text: '#334155',
+  fill: '#64748b',
+  stroke: '#334155',
+  text: '#f8fafc',
   label: 'Unassigned',
 };
 
