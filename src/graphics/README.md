@@ -65,13 +65,20 @@ uses `renderShapeOverlay` + `styleForShape` to colour the shape by zone state
 and draw the zone number/name/reading inside it. The engine never needs to know
 what a "zone" is.
 
-## Keyboard
+## Navigation & keyboard
 
+Pan/zoom follows Figma conventions:
+
+- **Scroll / two-finger swipe** — pan the canvas
+- **⌘/Ctrl + scroll**, or trackpad **pinch** — zoom to cursor
+- hold **Space** and drag (or the Pan tool / middle-mouse) — pan
+
+Keys:
+
+- `V` select · `R` rectangle · `O` circle · `L` line · `P` polygon · `H` pan
 - `Delete` / `Backspace` — delete selection
 - `Esc` — cancel polygon draft / clear selection
 - `Enter` — finish the current polygon
-- hold `Space` — temporary pan
-- mouse wheel — zoom to cursor
 
 ## Files
 

@@ -347,6 +347,11 @@ export default function MimicEditorPage() {
             </div>
           )}
 
+          {/* navigation hint */}
+          <div className="pointer-events-none absolute left-1/2 top-3 -translate-x-1/2 rounded-full border border-border bg-card/90 px-3 py-1 text-[11px] text-muted-foreground shadow-sm backdrop-blur">
+            Scroll to pan · <span className="font-medium">⌘/Ctrl + Scroll</span> to zoom · <span className="font-medium">Space</span>-drag to pan
+          </div>
+
           <div className="absolute bottom-3 left-3 flex items-center gap-1 rounded-lg border border-border bg-card/95 p-1 shadow-sm backdrop-blur">
             <IconBtn title="Zoom out" onClick={() => editor.zoomOut(zoomPivot())}><Minus className="h-4 w-4" /></IconBtn>
             <button

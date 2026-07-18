@@ -71,6 +71,7 @@ export default function GraphicsCanvas({
   const [size, setSize] = useState({ width: 0, height: 0 });
   const [polyDraft, setPolyDraft] = useState<Point[] | null>(null);
   const [cursorWorld, setCursorWorld] = useState<Point | null>(null);
+  const [grabbing, setGrabbing] = useState(false);
 
   // --- measure the surface (for grid coverage + fit-to-view) ---------------
   useLayoutEffect(() => {
@@ -95,6 +96,10 @@ export default function GraphicsCanvas({
     (e: { clientX: number; clientY: number }): Point => screenToWorld(viewport, toScreen(e)),
     [toScreen, viewport],
   );
+
+  // Keep the latest editor reachable from stable native listeners.
+  const editorRef = useRef(editor);
+  editorRef.current = editor;
 
   // --- hit helpers ---------------------------------------------------------
   const topmostAt = useCallback(
@@ -146,6 +151,7 @@ export default function GraphicsCanvas({
 
       if (wantPan) {
         interaction.current = { kind: 'panning', startScreen: screen, startX: viewport.x, startY: viewport.y };
+        setGrabbing(true);
         return;
       }
 
@@ -258,6 +264,7 @@ export default function GraphicsCanvas({
     (e: React.PointerEvent<SVGSVGElement>) => {
       const i = interaction.current;
       interaction.current = { kind: 'none' };
+      if (i.kind === 'panning') setGrabbing(false);
       if (svgRef.current?.hasPointerCapture(e.pointerId)) svgRef.current.releasePointerCapture(e.pointerId);
       const world = screenToWorld(viewport, toScreen(e));
 
@@ -343,14 +350,30 @@ export default function GraphicsCanvas({
     [tool, polyDraft, finalizePolygon, topmostAt, viewport, toScreen, onShapeActivate],
   );
 
-  const onWheel = useCallback(
-    (e: React.WheelEvent<SVGSVGElement>) => {
-      const pivot = toScreen(e);
-      const factor = Math.pow(1.0015, -e.deltaY);
-      editor.setViewport((vp) => zoomAt(vp, factor, pivot));
-    },
-    [editor, toScreen],
-  );
+  // Wheel handling, Figma-style: two-finger trackpad scroll (and mouse wheel)
+  // PANS; ⌘/Ctrl+scroll — and the pinch gesture, which the browser reports as a
+  // wheel event with ctrlKey=true — ZOOMS to the cursor. Attached natively as a
+  // non-passive listener so preventDefault stops the page from scrolling/zooming.
+  useEffect(() => {
+    const el = svgRef.current;
+    if (!el) return;
+    function onWheelNative(e: WheelEvent) {
+      e.preventDefault();
+      const rect = el!.getBoundingClientRect();
+      const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? rect.height : 1; // lines / pages → px
+      const dx = e.deltaX * unit;
+      const dy = e.deltaY * unit;
+      if (e.ctrlKey || e.metaKey) {
+        const pivot = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+        const factor = Math.pow(1.0015, -dy);
+        editorRef.current.setViewport((vp) => zoomAt(vp, factor, pivot));
+      } else {
+        editorRef.current.setViewport((vp) => ({ ...vp, x: vp.x - dx, y: vp.y - dy }));
+      }
+    }
+    el.addEventListener('wheel', onWheelNative, { passive: false });
+    return () => el.removeEventListener('wheel', onWheelNative);
+  }, []);
 
   // --- keyboard: delete / escape / enter -----------------------------------
   useEffect(() => {
@@ -371,6 +394,11 @@ export default function GraphicsCanvas({
         setPolyDraft(null);
       } else if (ev.key === ' ') {
         spaceDown.current = true;
+      } else if (!ev.metaKey && !ev.ctrlKey && !ev.altKey) {
+        // Figma-style single-key tool shortcuts
+        const map: Record<string, typeof tool> = { v: 'select', r: 'rectangle', o: 'circle', l: 'line', p: 'polygon', h: 'pan' };
+        const next = map[ev.key.toLowerCase()];
+        if (next && !(readOnly && next !== 'select' && next !== 'pan')) editor.setTool(next);
       }
     }
     function onKeyUp(ev: KeyboardEvent) {
@@ -391,8 +419,9 @@ export default function GraphicsCanvas({
 
   // --- rendering -----------------------------------------------------------
   const g = gridSize * viewport.zoom;
-  const cursor =
-    tool === 'pan' || spaceDown.current
+  const cursor = grabbing
+    ? 'grabbing'
+    : tool === 'pan' || spaceDown.current
       ? 'grab'
       : tool === 'select'
         ? 'default'
@@ -410,7 +439,6 @@ export default function GraphicsCanvas({
       onPointerUp={endInteraction}
       onPointerCancel={endInteraction}
       onDoubleClick={onDoubleClick}
-      onWheel={onWheel}
     >
       {gridSize > 0 && (
         <>
