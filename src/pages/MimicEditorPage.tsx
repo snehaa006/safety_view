@@ -1,26 +1,26 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
-  ChevronLeft, ImagePlus, Maximize, Minus, Plus, Redo2, Save, Trash2, Undo2, X,
+  ChevronLeft, ImagePlus, LayoutGrid, Maximize, Minus, PenTool, Plus, RefreshCw, Redo2, Save, Trash2, Undo2, X,
 } from 'lucide-react';
 import {
   GraphicsCanvas, boundsOf, removeShapes, sceneOps, useGraphicsEditor, type Shape,
 } from '@/graphics';
+import { fetchBuildingById, fetchZonesByBuilding, type ZoneWithContext } from '@/services/api';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { LoadingScreen } from '@/components/ui/spinner';
 import { cn } from '@/lib/utils';
 import ZoneEditorToolbar from '@/features/zone-editor/ZoneEditorToolbar';
 import ZoneInspector from '@/features/zone-editor/ZoneInspector';
 import ZoneOverlay from '@/features/zone-editor/ZoneOverlay';
-import ZoneAssignDialog, { type ZoneAssignResult } from '@/features/zone-editor/ZoneAssignDialog';
-import { getLayoutStore } from '@/features/zone-editor/storage';
+import ZoneAssignDialog from '@/features/zone-editor/ZoneAssignDialog';
+import { getMimicStore } from '@/features/zone-editor/storage';
 import { zoneColors } from '@/features/zone-editor/zoneStyle';
-import { zoneIdOf, type BuildingLayout, type EditorZone } from '@/features/zone-editor/types';
+import { zoneIdOf } from '@/features/zone-editor/types';
+import type { Building } from '@/types';
 
-const store = getLayoutStore();
+const store = getMimicStore();
 
-/** Load a data URL into an <img> to read its natural pixel size. */
 function readImage(file: File): Promise<{ src: string; width: number; height: number }> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -38,17 +38,18 @@ function readImage(file: File): Promise<{ src: string; width: number; height: nu
 
 type DialogState = { open: boolean; shapeId: string | null; mode: 'create-shape' | 'reassign' };
 
-export default function ZoneEditorPage() {
-  const { layoutId } = useParams();
+export default function MimicEditorPage() {
+  const { buildingId } = useParams();
+  const id = Number(buildingId);
   const navigate = useNavigate();
   const editor = useGraphicsEditor();
   const canvasWrapRef = useRef<HTMLDivElement>(null);
 
-  const [meta, setMeta] = useState<BuildingLayout | null>(null);
-  const [name, setName] = useState('');
-  const [zones, setZones] = useState<EditorZone[]>([]);
+  const [building, setBuilding] = useState<Building | null>(null);
+  const [zones, setZones] = useState<ZoneWithContext[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [dirty, setDirty] = useState(false);
   const [dialog, setDialog] = useState<DialogState>({ open: false, shapeId: null, mode: 'create-shape' });
@@ -57,49 +58,61 @@ export default function ZoneEditorPage() {
   const fileRef = useRef<HTMLInputElement>(null);
 
   const zonesById = useMemo(() => {
-    const map: Record<string, EditorZone> = {};
-    for (const z of zones) map[z.id] = z;
+    const map = new Map<number, ZoneWithContext>();
+    for (const z of zones) map.set(z.id, z);
     return map;
   }, [zones]);
+
+  const placedZoneIds = useMemo(() => {
+    const set = new Set<number>();
+    for (const s of editor.scene.shapes) {
+      const zid = zoneIdOf(s.data);
+      if (zid != null) set.add(zid);
+    }
+    return set;
+  }, [editor.scene]);
 
   // --- load ---------------------------------------------------------------
   useEffect(() => {
     let alive = true;
     setLoading(true);
-    store.get(layoutId ?? '').then((layout) => {
-      if (!alive) return;
-      if (!layout) {
-        setError('Building layout not found.');
+    Promise.all([fetchBuildingById(id), fetchZonesByBuilding(id), store.get(id)])
+      .then(([b, z, layout]) => {
+        if (!alive) return;
+        if (!b) {
+          setError('Building not found.');
+          setLoading(false);
+          return;
+        }
+        setBuilding(b);
+        setZones(z);
+        if (layout) editor.loadScene(layout.scene);
+        baselineRef.current = JSON.stringify(layout?.scene ?? editor.scene);
+        setDirty(false);
         setLoading(false);
-        return;
-      }
-      setMeta(layout);
-      setName(layout.name);
-      setZones(layout.zones);
-      editor.loadScene(layout.scene);
-      baselineRef.current = JSON.stringify({ n: layout.name, z: layout.zones, s: layout.scene });
-      setDirty(false);
-      setLoading(false);
-      // fit the view to the content once measured
-      requestAnimationFrame(() => {
-        const el = canvasWrapRef.current;
-        if (el) editor.fitToView({ width: el.clientWidth, height: el.clientHeight });
+        requestAnimationFrame(() => {
+          const el = canvasWrapRef.current;
+          if (el) editor.fitToView({ width: el.clientWidth, height: el.clientHeight });
+        });
+      })
+      .catch((err) => {
+        if (alive) {
+          setError(err instanceof Error ? err.message : 'Failed to load building.');
+          setLoading(false);
+        }
       });
-    });
     return () => {
       alive = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [layoutId]);
+  }, [id]);
 
   // --- dirty tracking -----------------------------------------------------
   useEffect(() => {
-    if (loading || !meta) return;
-    const cur = JSON.stringify({ n: name, z: zones, s: editor.scene });
-    setDirty(cur !== baselineRef.current);
-  }, [name, zones, editor.scene, loading, meta]);
+    if (loading || !building) return;
+    setDirty(JSON.stringify(editor.scene) !== baselineRef.current);
+  }, [editor.scene, loading, building]);
 
-  // warn on unload with unsaved edits
   useEffect(() => {
     function beforeUnload(e: BeforeUnloadEvent) {
       if (dirty) {
@@ -113,28 +126,19 @@ export default function ZoneEditorPage() {
 
   const selectedId = editor.selectedIds[0] ?? null;
   const selectedShape = selectedId ? sceneOps.findShape(editor.scene, selectedId) ?? null : null;
-  const selectedZone = selectedShape ? zonesById[zoneIdOf(selectedShape.data) ?? ''] ?? null : null;
+  const selectedZone = selectedShape ? zonesById.get(zoneIdOf(selectedShape.data) ?? -1) ?? null : null;
   const shapeCountForZone = selectedZone
     ? editor.scene.shapes.filter((s) => zoneIdOf(s.data) === selectedZone.id).length
     : 0;
 
-  // --- shape creation → zone assignment -----------------------------------
+  // --- shape creation → zone linking --------------------------------------
   const onShapeCreated = useCallback((shape: Shape) => {
     setDialog({ open: true, shapeId: shape.id, mode: 'create-shape' });
   }, []);
 
   const resolveDialog = useCallback(
-    (result: ZoneAssignResult) => {
-      const shapeId = dialog.shapeId;
-      if (!shapeId) return;
-      let zoneId: string | null = null;
-      if (result.create) {
-        setZones((prev) => [...prev, result.create!]);
-        zoneId = result.create.id;
-      } else if (result.assignZoneId) {
-        zoneId = result.assignZoneId;
-      }
-      if (zoneId) editor.updateShape(shapeId, { data: { zoneId } });
+    (zoneId: number) => {
+      if (dialog.shapeId) editor.updateShape(dialog.shapeId, { data: { zoneId } });
       setDialog({ open: false, shapeId: null, mode: 'create-shape' });
     },
     [dialog.shapeId, editor],
@@ -142,18 +146,12 @@ export default function ZoneEditorPage() {
 
   const cancelDialog = useCallback(() => {
     if (dialog.mode === 'create-shape' && dialog.shapeId) {
-      const id = dialog.shapeId;
-      editor.commitScene((prev) => removeShapes(prev, [id]));
+      const sid = dialog.shapeId;
+      editor.commitScene((prev) => removeShapes(prev, [sid]));
       editor.setSelection([]);
     }
     setDialog({ open: false, shapeId: null, mode: 'create-shape' });
   }, [dialog, editor]);
-
-  // --- zone editing (updates every shape referencing the zone) ------------
-  const patchZone = useCallback((patch: Partial<EditorZone>) => {
-    if (!selectedZone) return;
-    setZones((prev) => prev.map((z) => (z.id === selectedZone.id ? { ...z, ...patch } : z)));
-  }, [selectedZone]);
 
   // --- background ---------------------------------------------------------
   const onPickBackground = useCallback(
@@ -175,32 +173,40 @@ export default function ZoneEditorPage() {
 
   const setBgOpacity = useCallback(
     (opacity: number) => {
-      const bg = editor.scene.background;
-      if (bg) editor.commitScene((prev) => ({ ...prev, background: prev.background ? { ...prev.background, opacity } : null }));
+      if (editor.scene.background) {
+        editor.commitScene((prev) => ({ ...prev, background: prev.background ? { ...prev.background, opacity } : null }));
+      }
     },
     [editor],
   );
 
+  // --- live zone refresh --------------------------------------------------
+  const refreshZones = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      setZones(await fetchZonesByBuilding(id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to refresh zones.');
+    } finally {
+      setRefreshing(false);
+    }
+  }, [id]);
+
   // --- save ---------------------------------------------------------------
   const save = useCallback(async () => {
-    if (!meta) return;
     setSaving(true);
     setError('');
     try {
-      const layout: BuildingLayout = { ...meta, name: name.trim() || meta.name, zones, scene: editor.scene, updatedAt: meta.updatedAt };
-      const saved = await store.save(layout);
-      setMeta(saved);
-      setName(saved.name);
-      baselineRef.current = JSON.stringify({ n: saved.name, z: saved.zones, s: saved.scene });
+      const saved = await store.save(id, editor.scene);
+      baselineRef.current = JSON.stringify(saved.scene);
       setDirty(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Save failed.');
     } finally {
       setSaving(false);
     }
-  }, [meta, name, zones, editor.scene]);
+  }, [id, editor.scene]);
 
-  // ctrl/cmd+S to save, ctrl+z / shift+ctrl+z undo/redo
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       const mod = e.metaKey || e.ctrlKey;
@@ -229,11 +235,10 @@ export default function ZoneEditorPage() {
     return el ? { x: el.clientWidth / 2, y: el.clientHeight / 2 } : undefined;
   };
 
-  // --- render helpers passed to the engine --------------------------------
   const renderOverlay = useCallback(
     (shape: Shape) => {
-      if (shape.type === 'line') return null; // lines act as connectors
-      const zone = zonesById[zoneIdOf(shape.data) ?? ''] ?? null;
+      if (shape.type === 'line') return null;
+      const zone = zonesById.get(zoneIdOf(shape.data) ?? -1) ?? null;
       const b = boundsOf(shape);
       return <ZoneOverlay zone={zone} compact={b.width < 110 || b.height < 60} />;
     },
@@ -242,19 +247,19 @@ export default function ZoneEditorPage() {
 
   const styleForShape = useCallback(
     (shape: Shape) => {
-      const zone = zonesById[zoneIdOf(shape.data) ?? ''] ?? null;
-      const c = zoneColors(zone?.state);
+      const zone = zonesById.get(zoneIdOf(shape.data) ?? -1) ?? null;
+      const c = zoneColors(zone?.current_state);
       return { fill: c.fill, stroke: c.stroke, fillOpacity: shape.type === 'line' ? 1 : 0.4 };
     },
     [zonesById],
   );
 
-  if (loading) return <LoadingScreen text="Loading building layout…" />;
-  if (!meta) {
+  if (loading) return <LoadingScreen text="Loading mimic view…" />;
+  if (!building) {
     return (
       <div className="py-20 text-center">
-        <p className="text-muted-foreground">{error || 'Building layout not found.'}</p>
-        <Button variant="outline" className="mt-4" onClick={() => navigate('/zone-editor')}>Back to Buildings</Button>
+        <p className="text-muted-foreground">{error || 'Building not found.'}</p>
+        <Button variant="outline" className="mt-4" onClick={() => navigate('/all-buildings')}>Back to Buildings</Button>
       </div>
     );
   }
@@ -266,17 +271,33 @@ export default function ZoneEditorPage() {
       {/* top bar */}
       <div className="flex flex-wrap items-center gap-2">
         <button
-          onClick={() => navigate('/zone-editor')}
+          onClick={() => navigate(`/buildings/${id}`)}
           className="inline-flex items-center gap-1 text-sm font-medium text-muted-foreground hover:text-foreground"
         >
-          <ChevronLeft className="h-4 w-4" /> Buildings
+          <ChevronLeft className="h-4 w-4" /> {building.building_name}
         </button>
-        <Input value={name} onChange={(e) => setName(e.target.value)} className="h-9 w-56 font-semibold" aria-label="Building name" />
+
+        {/* Static / Mimic view toggle */}
+        <div className="ml-1 flex items-center gap-0.5 rounded-md border border-border bg-secondary p-0.5 text-sm">
+          <button
+            onClick={() => navigate(`/buildings/${id}`)}
+            className="flex items-center gap-1.5 rounded px-2.5 py-1 font-medium text-muted-foreground hover:text-foreground"
+          >
+            <LayoutGrid className="h-3.5 w-3.5" /> Static
+          </button>
+          <button className="flex items-center gap-1.5 rounded bg-background px-2.5 py-1 font-medium shadow-sm">
+            <PenTool className="h-3.5 w-3.5" /> Mimic
+          </button>
+        </div>
+
         <span className="text-xs text-muted-foreground">
-          {editor.scene.shapes.length} shape{editor.scene.shapes.length !== 1 ? 's' : ''} · {zones.length} zone{zones.length !== 1 ? 's' : ''}
+          {editor.scene.shapes.length} shape{editor.scene.shapes.length !== 1 ? 's' : ''} · {placedZoneIds.size}/{zones.length} zones placed
         </span>
 
         <div className="ml-auto flex items-center gap-2">
+          <Button variant="outline" size="sm" className="gap-1.5" onClick={() => void refreshZones()} disabled={refreshing} title="Refresh live zone status">
+            <RefreshCw className={cn('h-4 w-4', refreshing && 'animate-spin')} /> Refresh
+          </Button>
           <input
             ref={fileRef}
             type="file"
@@ -285,7 +306,7 @@ export default function ZoneEditorPage() {
             onChange={(e) => { void onPickBackground(e.target.files?.[0]); e.target.value = ''; }}
           />
           <Button variant="outline" size="sm" className="gap-1.5" onClick={() => fileRef.current?.click()}>
-            <ImagePlus className="h-4 w-4" /> {bg ? 'Replace' : 'Background'}
+            <ImagePlus className="h-4 w-4" /> {bg ? 'Replace' : 'Floor Plan'}
           </Button>
           <Button size="sm" className="gap-1.5" onClick={() => void save()} disabled={saving || !dirty}>
             <Save className="h-4 w-4" /> {saving ? 'Saving…' : dirty ? 'Save' : 'Saved'}
@@ -302,12 +323,10 @@ export default function ZoneEditorPage() {
 
       {/* editor body */}
       <div className="flex min-h-0 flex-1 gap-3">
-        {/* tool rail */}
         <div className="flex flex-col gap-3">
           <ZoneEditorToolbar tool={editor.tool} onToolChange={editor.setTool} />
         </div>
 
-        {/* canvas */}
         <div
           ref={canvasWrapRef}
           className="relative min-w-0 flex-1 overflow-hidden rounded-lg border border-border bg-[#f8fafc] dark:bg-[#0b1220]"
@@ -320,16 +339,14 @@ export default function ZoneEditorPage() {
             styleForShape={styleForShape}
           />
 
-          {/* empty-state hint */}
           {editor.scene.shapes.length === 0 && !bg && (
             <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 text-center text-sm text-muted-foreground">
               <ImagePlus className="h-8 w-8 opacity-50" />
-              <p className="font-medium">Upload a floor plan, then draw zones over it.</p>
+              <p className="font-medium">Upload this building’s floor plan, then draw its zones over it.</p>
               <p className="text-xs">Pick a shape tool on the left and drag on the canvas.</p>
             </div>
           )}
 
-          {/* bottom-left: zoom + history controls */}
           <div className="absolute bottom-3 left-3 flex items-center gap-1 rounded-lg border border-border bg-card/95 p-1 shadow-sm backdrop-blur">
             <IconBtn title="Zoom out" onClick={() => editor.zoomOut(zoomPivot())}><Minus className="h-4 w-4" /></IconBtn>
             <button
@@ -347,7 +364,6 @@ export default function ZoneEditorPage() {
             <IconBtn title="Redo (Ctrl+Shift+Z)" onClick={editor.redo} disabled={!editor.canRedo}><Redo2 className="h-4 w-4" /></IconBtn>
           </div>
 
-          {/* background opacity, when present */}
           {bg && (
             <div className="absolute bottom-3 right-3 flex items-center gap-2 rounded-lg border border-border bg-card/95 px-3 py-1.5 text-xs shadow-sm backdrop-blur">
               <span className="text-muted-foreground">Plan</span>
@@ -359,7 +375,7 @@ export default function ZoneEditorPage() {
               />
               <button
                 className="text-muted-foreground hover:text-crit-text"
-                title="Remove background"
+                title="Remove floor plan"
                 onClick={() => editor.setBackground(null)}
               >
                 <Trash2 className="h-3.5 w-3.5" />
@@ -368,13 +384,11 @@ export default function ZoneEditorPage() {
           )}
         </div>
 
-        {/* inspector */}
         <div className="hidden w-72 shrink-0 overflow-hidden rounded-lg border border-border bg-card lg:block">
           <ZoneInspector
             shape={selectedShape}
             zone={selectedZone}
             shapeCountForZone={shapeCountForZone}
-            onZoneChange={patchZone}
             onReassign={() => selectedShape && setDialog({ open: true, shapeId: selectedShape.id, mode: 'reassign' })}
             onDeleteShape={() => editor.removeSelected()}
             onBringToFront={() => selectedId && editor.commitScene((prev) => sceneOps.reorder(prev, selectedId, 'front'))}
@@ -386,8 +400,10 @@ export default function ZoneEditorPage() {
       <ZoneAssignDialog
         open={dialog.open}
         zones={zones}
+        placedZoneIds={placedZoneIds}
+        currentZoneId={dialog.mode === 'reassign' ? zoneIdOf(selectedShape?.data) : null}
         onCancel={cancelDialog}
-        onResolve={resolveDialog}
+        onAssign={resolveDialog}
       />
     </div>
   );

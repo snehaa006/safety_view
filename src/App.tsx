@@ -39,8 +39,7 @@ import AllBuildingsPage from '@/pages/AllBuildingsPage';
 import AllPanelsPage from '@/pages/AllPanelsPage';
 import ZonesByStatePage from '@/pages/ZonesByStatePage';
 import ReportsPage from '@/pages/ReportsPage';
-import BuildingLayoutsPage from '@/pages/BuildingLayoutsPage';
-import ZoneEditorPage from '@/pages/ZoneEditorPage';
+import MimicEditorPage from '@/pages/MimicEditorPage';
 
 export default function App() {
   return (
@@ -55,6 +54,7 @@ export default function App() {
             <Route element={<DashboardLayout />}>
               <Route path="/buildings" element={<BuildingsPage />} />
               <Route path="/buildings/:buildingId" element={<BuildingPanelsPage />} />
+              <Route path="/buildings/:buildingId/mimic" element={<MimicEditorPage />} />
               <Route path="/all-buildings" element={<AllBuildingsPage />} />
               <Route path="/all-panels" element={<AllPanelsPage />} />
               <Route path="/fire-zones" element={<ZonesByStatePage />} />
@@ -62,8 +62,6 @@ export default function App() {
               <Route path="/panels/:panelId" element={<PanelZonesPage />} />
               <Route path="/alerts" element={<AlertsPage />} />
               <Route path="/reports" element={<ReportsPage />} />
-              <Route path="/zone-editor" element={<BuildingLayoutsPage />} />
-              <Route path="/zone-editor/:layoutId" element={<ZoneEditorPage />} />
               <Route path="/profile" element={<ProfilePage />} />
               <Route path="/settings" element={<SettingsPage />} />
 

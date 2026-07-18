@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { ChevronLeft, Cpu, Search, X } from 'lucide-react';
+import { ChevronLeft, Cpu, LayoutGrid, PenTool, Search, X } from 'lucide-react';
 import { fetchBuildingById, fetchPanelsByBuilding, locationLabel } from '@/services/api';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -96,6 +96,20 @@ export default function BuildingPanelsPage() {
           <span className="font-bold">{building?.building_name}</span>
           {building?.group_name && <Badge variant="water">{building.group_name}</Badge>}
           <span className="text-xs text-muted-foreground">{locationLabel(building?.location ?? null)}</span>
+        </div>
+
+        {/* Static / Mimic view toggle */}
+        <div className="ml-auto flex items-center gap-0.5 rounded-md border border-border bg-secondary p-0.5 text-sm">
+          <button className="flex items-center gap-1.5 rounded bg-background px-2.5 py-1 font-medium shadow-sm">
+            <LayoutGrid className="h-3.5 w-3.5" /> Static
+          </button>
+          <button
+            onClick={() => navigate(`/buildings/${id}/mimic`)}
+            className="flex items-center gap-1.5 rounded px-2.5 py-1 font-medium text-muted-foreground hover:text-foreground"
+            title="Open the graphical mimic view"
+          >
+            <PenTool className="h-3.5 w-3.5" /> Mimic
+          </button>
         </div>
       </Card>
 
