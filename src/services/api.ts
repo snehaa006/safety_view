@@ -770,50 +770,6 @@ export async function fetchZonesByPanel(panelId: number): Promise<Zone[]> {
   }));
 }
 
-// All zones across a building's panels, with panel context — used by the
-// mimic (graphic) view to bind shapes to real zones and show their live state.
-export async function fetchZonesByBuilding(buildingId: number): Promise<ZoneWithContext[]> {
-  const { data: panelData, error: panelErr } = await supabase
-    .from('panels')
-    .select('id, building_id, panel_code, panel_name, status, buildings ( building_name )')
-    .eq('building_id', buildingId);
-  if (panelErr) throw new Error(panelErr.message);
-  const panels = (panelData ?? []) as any[];
-  if (panels.length === 0) return [];
-
-  const panelMap: Record<number, { panel_code: string; panel_name: string | null; panel_status: string; building_id: number; building_name: string }> = {};
-  for (const p of panels) {
-    panelMap[p.id] = {
-      panel_code: p.panel_code,
-      panel_name: p.panel_name ?? null,
-      panel_status: p.status,
-      building_id: p.building_id,
-      building_name: p.buildings?.building_name ?? 'Unknown',
-    };
-  }
-
-  const { data, error } = await supabase
-    .from('zones')
-    .select('id, panel_id, zone_number, zone_name, zone_type, current_state, current_reading, available_actions, updated_at')
-    .in('panel_id', panels.map((p) => p.id))
-    .order('panel_id')
-    .order('zone_number');
-  if (error) throw new Error(error.message);
-
-  return ((data ?? []) as any[]).map((z) => ({
-    id: z.id,
-    panel_id: z.panel_id,
-    zone_number: z.zone_number,
-    zone_name: z.zone_name,
-    zone_type: z.zone_type,
-    current_state: z.current_state,
-    current_reading: z.current_reading ?? null,
-    available_actions: (z.available_actions ?? []) as ManualAction[],
-    updated_at: z.updated_at ?? null,
-    ...panelMap[z.panel_id],
-  }));
-}
-
 // User triggers a manual action → record an action_log (panel executes via backend).
 export async function performZoneAction(zoneId: number, action: ManualAction): Promise<void> {
   if (auditActorId == null) throw new Error('Not authenticated');

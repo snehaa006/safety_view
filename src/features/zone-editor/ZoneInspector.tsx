@@ -7,7 +7,7 @@
 import { ArrowDownToLine, ArrowUpToLine, Link2, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { Shape } from '@/graphics';
-import type { ZoneWithContext } from '@/services/api';
+import type { Zone } from '@/types';
 import { zoneColors } from './zoneStyle';
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
@@ -29,7 +29,7 @@ export default function ZoneInspector({
   onSendToBack,
 }: {
   shape: Shape | null;
-  zone: ZoneWithContext | null;
+  zone: Zone | null;
   shapeCountForZone: number;
   onReassign: () => void;
   onDeleteShape: () => void;
@@ -68,7 +68,6 @@ export default function ZoneInspector({
             <div>
               <Row label="Zone" value={`Zone ${zone.zone_number}`} />
               <Row label="Name" value={zone.zone_name} />
-              <Row label="Panel" value={zone.panel_name || zone.panel_code} />
               <Row label="Type" value={zone.zone_type} />
               <Row
                 label="State"

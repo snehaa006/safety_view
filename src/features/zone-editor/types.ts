@@ -1,16 +1,16 @@
 // ---------------------------------------------------------------------------
-// Mimic-view domain model. A building's mimic view is a graphical second view
-// of an existing building: a background floor plan plus shapes drawn with the
-// generic @/graphics engine. Every shape references a REAL zone by id
-// (public.zones.id) via `data.zoneId`, so the shape displays that zone's live
-// fire/fault state. Zone name/state/reading are never stored here — they come
-// live from the zones table.
+// Mimic-view domain model. A panel's mimic view is a graphical second view of a
+// single panel: a background floor plan plus shapes drawn with the generic
+// @/graphics engine. Every shape references a REAL zone by id (public.zones.id)
+// via `data.zoneId`, so the shape displays that zone's live fire/fault state.
+// Zone name/state/reading are never stored here — they come live from the zones
+// table.
 // ---------------------------------------------------------------------------
 
 import type { Scene } from '@/graphics';
 
 export interface MimicLayout {
-  buildingId: number;
+  panelId: number;
   scene: Scene; // shapes carry data = { zoneId: <real zones.id> }
   createdAt: string;
   updatedAt: string;

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ChevronLeft, Pencil, Save, X } from 'lucide-react';
+import { ChevronLeft, LayoutGrid, Pencil, PenTool, Save, X } from 'lucide-react';
 import {
   fetchPanelById,
   fetchZonesByPanel,
@@ -187,6 +187,20 @@ export default function PanelZonesPage() {
             {isOnline ? 'Online' : 'Offline'}
           </span>
           {panel?.building_name && <span className="text-xs text-muted-foreground">{panel.building_name}</span>}
+        </div>
+
+        {/* Static / Mimic view toggle */}
+        <div className="ml-auto flex items-center gap-0.5 rounded-md border border-border bg-secondary p-0.5 text-sm">
+          <button className="flex items-center gap-1.5 rounded bg-background px-2.5 py-1 font-medium shadow-sm">
+            <LayoutGrid className="h-3.5 w-3.5" /> Static
+          </button>
+          <button
+            onClick={() => navigate(`/panels/${id}/mimic`)}
+            className="flex items-center gap-1.5 rounded px-2.5 py-1 font-medium text-muted-foreground hover:text-foreground"
+            title="Open the graphical mimic view"
+          >
+            <PenTool className="h-3.5 w-3.5" /> Mimic
+          </button>
         </div>
       </Card>
 

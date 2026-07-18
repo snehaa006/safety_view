@@ -6,7 +6,7 @@ import {
 import {
   GraphicsCanvas, boundsOf, removeShapes, sceneOps, useGraphicsEditor, type Shape,
 } from '@/graphics';
-import { fetchBuildingById, fetchZonesByBuilding, type ZoneWithContext } from '@/services/api';
+import { fetchPanelById, fetchZonesByPanel } from '@/services/api';
 import { Button } from '@/components/ui/button';
 import { LoadingScreen } from '@/components/ui/spinner';
 import { cn } from '@/lib/utils';
@@ -17,7 +17,7 @@ import ZoneAssignDialog from '@/features/zone-editor/ZoneAssignDialog';
 import { getMimicStore } from '@/features/zone-editor/storage';
 import { zoneColors } from '@/features/zone-editor/zoneStyle';
 import { zoneIdOf } from '@/features/zone-editor/types';
-import type { Building } from '@/types';
+import type { Panel, Zone } from '@/types';
 
 const store = getMimicStore();
 
@@ -39,14 +39,14 @@ function readImage(file: File): Promise<{ src: string; width: number; height: nu
 type DialogState = { open: boolean; shapeId: string | null; mode: 'create-shape' | 'reassign' };
 
 export default function MimicEditorPage() {
-  const { buildingId } = useParams();
-  const id = Number(buildingId);
+  const { panelId } = useParams();
+  const id = Number(panelId);
   const navigate = useNavigate();
   const editor = useGraphicsEditor();
   const canvasWrapRef = useRef<HTMLDivElement>(null);
 
-  const [building, setBuilding] = useState<Building | null>(null);
-  const [zones, setZones] = useState<ZoneWithContext[]>([]);
+  const [panel, setPanel] = useState<Panel | null>(null);
+  const [zones, setZones] = useState<Zone[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -58,7 +58,7 @@ export default function MimicEditorPage() {
   const fileRef = useRef<HTMLInputElement>(null);
 
   const zonesById = useMemo(() => {
-    const map = new Map<number, ZoneWithContext>();
+    const map = new Map<number, Zone>();
     for (const z of zones) map.set(z.id, z);
     return map;
   }, [zones]);
@@ -76,15 +76,15 @@ export default function MimicEditorPage() {
   useEffect(() => {
     let alive = true;
     setLoading(true);
-    Promise.all([fetchBuildingById(id), fetchZonesByBuilding(id), store.get(id)])
-      .then(([b, z, layout]) => {
+    Promise.all([fetchPanelById(id), fetchZonesByPanel(id), store.get(id)])
+      .then(([p, z, layout]) => {
         if (!alive) return;
-        if (!b) {
-          setError('Building not found.');
+        if (!p) {
+          setError('Panel not found.');
           setLoading(false);
           return;
         }
-        setBuilding(b);
+        setPanel(p);
         setZones(z);
         if (layout) editor.loadScene(layout.scene);
         baselineRef.current = JSON.stringify(layout?.scene ?? editor.scene);
@@ -97,7 +97,7 @@ export default function MimicEditorPage() {
       })
       .catch((err) => {
         if (alive) {
-          setError(err instanceof Error ? err.message : 'Failed to load building.');
+          setError(err instanceof Error ? err.message : 'Failed to load panel.');
           setLoading(false);
         }
       });
@@ -109,9 +109,9 @@ export default function MimicEditorPage() {
 
   // --- dirty tracking -----------------------------------------------------
   useEffect(() => {
-    if (loading || !building) return;
+    if (loading || !panel) return;
     setDirty(JSON.stringify(editor.scene) !== baselineRef.current);
-  }, [editor.scene, loading, building]);
+  }, [editor.scene, loading, panel]);
 
   useEffect(() => {
     function beforeUnload(e: BeforeUnloadEvent) {
@@ -184,7 +184,7 @@ export default function MimicEditorPage() {
   const refreshZones = useCallback(async () => {
     setRefreshing(true);
     try {
-      setZones(await fetchZonesByBuilding(id));
+      setZones(await fetchZonesByPanel(id));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to refresh zones.');
     } finally {
@@ -255,11 +255,11 @@ export default function MimicEditorPage() {
   );
 
   if (loading) return <LoadingScreen text="Loading mimic view…" />;
-  if (!building) {
+  if (!panel) {
     return (
       <div className="py-20 text-center">
-        <p className="text-muted-foreground">{error || 'Building not found.'}</p>
-        <Button variant="outline" className="mt-4" onClick={() => navigate('/all-buildings')}>Back to Buildings</Button>
+        <p className="text-muted-foreground">{error || 'Panel not found.'}</p>
+        <Button variant="outline" className="mt-4" onClick={() => navigate('/all-panels')}>Back to Panels</Button>
       </div>
     );
   }
@@ -271,16 +271,16 @@ export default function MimicEditorPage() {
       {/* top bar */}
       <div className="flex flex-wrap items-center gap-2">
         <button
-          onClick={() => navigate(`/buildings/${id}`)}
+          onClick={() => navigate(`/panels/${id}`)}
           className="inline-flex items-center gap-1 text-sm font-medium text-muted-foreground hover:text-foreground"
         >
-          <ChevronLeft className="h-4 w-4" /> {building.building_name}
+          <ChevronLeft className="h-4 w-4" /> {panel.panel_name || panel.panel_code}
         </button>
 
         {/* Static / Mimic view toggle */}
         <div className="ml-1 flex items-center gap-0.5 rounded-md border border-border bg-secondary p-0.5 text-sm">
           <button
-            onClick={() => navigate(`/buildings/${id}`)}
+            onClick={() => navigate(`/panels/${id}`)}
             className="flex items-center gap-1.5 rounded px-2.5 py-1 font-medium text-muted-foreground hover:text-foreground"
           >
             <LayoutGrid className="h-3.5 w-3.5" /> Static
@@ -342,7 +342,7 @@ export default function MimicEditorPage() {
           {editor.scene.shapes.length === 0 && !bg && (
             <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 text-center text-sm text-muted-foreground">
               <ImagePlus className="h-8 w-8 opacity-50" />
-              <p className="font-medium">Upload this building’s floor plan, then draw its zones over it.</p>
+              <p className="font-medium">Upload this panel’s floor plan, then draw its zones over it.</p>
               <p className="text-xs">Pick a shape tool on the left and drag on the canvas.</p>
             </div>
           )}

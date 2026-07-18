@@ -54,12 +54,12 @@ export default function App() {
             <Route element={<DashboardLayout />}>
               <Route path="/buildings" element={<BuildingsPage />} />
               <Route path="/buildings/:buildingId" element={<BuildingPanelsPage />} />
-              <Route path="/buildings/:buildingId/mimic" element={<MimicEditorPage />} />
               <Route path="/all-buildings" element={<AllBuildingsPage />} />
               <Route path="/all-panels" element={<AllPanelsPage />} />
               <Route path="/fire-zones" element={<ZonesByStatePage />} />
               <Route path="/fault-zones" element={<ZonesByStatePage />} />
               <Route path="/panels/:panelId" element={<PanelZonesPage />} />
+              <Route path="/panels/:panelId/mimic" element={<MimicEditorPage />} />
               <Route path="/alerts" element={<AlertsPage />} />
               <Route path="/reports" element={<ReportsPage />} />
               <Route path="/profile" element={<ProfilePage />} />
