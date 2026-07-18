@@ -49,11 +49,11 @@ export default function ZoneOverlay({ zone, compact }: { zone: Zone | null; comp
         overflow: 'hidden',
       }}
     >
-      <div style={{ fontWeight: 800, fontSize: compact ? 13 : 16, lineHeight: 1.1, letterSpacing: '0.02em' }}>
+      <div style={{ fontWeight: 800, fontSize: compact ? 13 : 16, lineHeight: 1.1, letterSpacing: '0.02em', textShadow: '0 1px 2px rgba(255,255,255,0.7)' }}>
         ZONE-{zone.zone_number}
       </div>
       {!compact && zone.zone_name && (
-        <div style={{ fontWeight: 600, fontSize: 11, lineHeight: 1.15, maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+        <div style={{ fontWeight: 700, fontSize: 11, lineHeight: 1.15, maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', textShadow: '0 1px 2px rgba(255,255,255,0.7)' }}>
           {zone.zone_name}
         </div>
       )}
